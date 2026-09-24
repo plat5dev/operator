@@ -48,6 +48,8 @@ No configured route → **404** `NOT_FOUND`.
 
 Upstream status and body are passed through. This gateway does not translate them.
 
+Upstream dial failure → **503** `SERVICE_UNAVAILABLE`. That is this gateway's rejection. It is not a downstream status.
+
 ## Attribution
 
 This gateway logs the operator id, `X-Request-ID`, and the target headers it injected. That log is who did it.
@@ -67,6 +69,7 @@ Plat5 envelope: `error.type`, `error.code`, `error.message`, `error.request_id`.
 | Bad or missing operator credential | **401** `UNAUTHORIZED` |
 | Missing required target header, or path org mismatch | **400** `VALIDATION_ERROR` |
 | No configured route | **404** `NOT_FOUND` |
+| Upstream dial failure | **503** `SERVICE_UNAVAILABLE` |
 
 ## What this is not
 

@@ -1,0 +1,296 @@
+package gateway
+
+import (
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/plat5dev/operator/accounts"
+	"github.com/plat5dev/operator/internal/apierr"
+)
+
+func TestProxy(t *testing.T) {
+	var mu sync.Mutex
+	var calls int
+	var got http.Header
+	var gotPath string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		got = r.Header.Clone()
+		gotPath = r.URL.Path
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":{"code":"FORBIDDEN"}}`))
+	}))
+	defer up.Close()
+
+	store := openStore(t)
+	operatorID, err := store.Create("op@example.com", "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := store.Login("op@example.com", "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	routes := mustRoutes(t, up.URL)
+	srv := httptest.NewServer(apierr.Middleware(Proxy(store, routes, slog.New(slog.NewJSONHandler(io.Discard, nil)))))
+	defer srv.Close()
+
+	t.Run("missing credential does not dial", func(t *testing.T) {
+		before := callCount(&mu, &calls)
+		res := do(t, srv, http.MethodGet, "/api/organizations", "", "")
+		if res.StatusCode != http.StatusUnauthorized || callCount(&mu, &calls) != before {
+			t.Fatalf("status %d calls %d", res.StatusCode, callCount(&mu, &calls))
+		}
+		assertCode(t, res, "UNAUTHORIZED")
+	})
+
+	t.Run("missing target does not dial", func(t *testing.T) {
+		before := callCount(&mu, &calls)
+		res := do(t, srv, http.MethodGet, "/api/organizations", token, "")
+		if res.StatusCode != http.StatusBadRequest || callCount(&mu, &calls) != before {
+			t.Fatalf("status %d", res.StatusCode)
+		}
+		assertCode(t, res, "VALIDATION_ERROR")
+	})
+
+	t.Run("user route injects only the declared user", func(t *testing.T) {
+		res := do(t, srv, http.MethodGet, "/api/organizations?limit=1", token, "user-1", header{"X-Organization-Id", "org-1"}, header{"X-Request-ID", "rid-1"})
+		if res.StatusCode != http.StatusForbidden {
+			t.Fatalf("status %d", res.StatusCode)
+		}
+		body, _ := io.ReadAll(res.Body)
+		if string(body) != `{"error":{"code":"FORBIDDEN"}}` {
+			t.Fatalf("body %s", body)
+		}
+		if res.Header.Get("X-Request-ID") != "rid-1" {
+			t.Fatalf("response request id %q", res.Header.Get("X-Request-ID"))
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if gotPath != "/api/organizations" {
+			t.Fatalf("path %s", gotPath)
+		}
+		if got.Get("X-User-Id") != "user-1" {
+			t.Fatalf("user %q", got.Get("X-User-Id"))
+		}
+		if got.Get("X-Organization-Id") != "" || got.Get("X-Member-Id") != "" || got.Get("Authorization") != "" || got.Get("X-Api-Key") != "" {
+			t.Fatalf("forwarded identity or credential: %v", got)
+		}
+		if got.Get("X-Request-ID") != "rid-1" {
+			t.Fatalf("upstream request id %q", got.Get("X-Request-ID"))
+		}
+		if headerHas(got, operatorID) {
+			t.Fatal("operator id was forwarded")
+		}
+	})
+
+	t.Run("path org mismatch does not dial", func(t *testing.T) {
+		before := callCount(&mu, &calls)
+		res := do(t, srv, http.MethodGet, "/api/organizations/org-1", token, "user-1", header{"X-Organization-Id", "org-2"})
+		if res.StatusCode != http.StatusBadRequest || callCount(&mu, &calls) != before {
+			t.Fatalf("status %d", res.StatusCode)
+		}
+		assertCode(t, res, "VALIDATION_ERROR")
+	})
+
+	t.Run("user route does not forward a matching org header", func(t *testing.T) {
+		res := do(t, srv, http.MethodGet, "/api/organizations/org-1", token, "user-1", header{"X-Organization-Id", "org-1"})
+		if res.StatusCode != http.StatusForbidden {
+			t.Fatalf("status %d", res.StatusCode)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if got.Get("X-User-Id") != "user-1" || got.Get("X-Organization-Id") != "" {
+			t.Fatalf("headers %v", got)
+		}
+	})
+
+	t.Run("organization route injects org and member only", func(t *testing.T) {
+		res := do(t, srv, http.MethodGet, "/api/widgets/org-9", token, "user-1", header{"X-Organization-Id", "org-9"}, header{"X-Member-Id", "mem-1"})
+		if res.StatusCode != http.StatusForbidden {
+			t.Fatalf("status %d", res.StatusCode)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if got.Get("X-Organization-Id") != "org-9" || got.Get("X-Member-Id") != "mem-1" || got.Get("X-User-Id") != "" {
+			t.Fatalf("headers %v", got)
+		}
+		if headerHas(got, operatorID) {
+			t.Fatal("operator id was forwarded")
+		}
+	})
+
+	t.Run("none route injects nothing", func(t *testing.T) {
+		res := do(t, srv, http.MethodGet, "/api/public", token, "user-1", header{"X-Organization-Id", "org-1"}, header{"X-Member-Id", "mem-1"})
+		if res.StatusCode != http.StatusForbidden {
+			t.Fatalf("status %d", res.StatusCode)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if got.Get("X-User-Id") != "" || got.Get("X-Organization-Id") != "" || got.Get("X-Member-Id") != "" || got.Get("Authorization") != "" {
+			t.Fatalf("headers %v", got)
+		}
+	})
+
+	t.Run("unknown route", func(t *testing.T) {
+		before := callCount(&mu, &calls)
+		res := do(t, srv, http.MethodPost, "/api/organizations", token, "user-1")
+		if res.StatusCode != http.StatusNotFound || callCount(&mu, &calls) != before {
+			t.Fatalf("status %d", res.StatusCode)
+		}
+		if !strings.Contains(string(readBody(t, res)), `"details":null`) {
+			t.Fatal("details not null")
+		}
+	})
+
+	t.Run("generates request id", func(t *testing.T) {
+		res := do(t, srv, http.MethodGet, "/api/organizations", token, "user-1")
+		if res.Header.Get("X-Request-ID") == "" {
+			t.Fatal("missing request id")
+		}
+	})
+}
+
+func TestDialFailure(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	store := openStore(t)
+	if _, err := store.Create("op@example.com", "secret"); err != nil {
+		t.Fatal(err)
+	}
+	token, err := store.Login("op@example.com", "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes := mustRoutes(t, "http://"+addr)
+	srv := httptest.NewServer(apierr.Middleware(Proxy(store, routes, slog.New(slog.NewJSONHandler(io.Discard, nil)))))
+	defer srv.Close()
+	res := do(t, srv, http.MethodGet, "/api/organizations", token, "user-1")
+	if res.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status %d", res.StatusCode)
+	}
+	assertCode(t, res, "SERVICE_UNAVAILABLE")
+}
+
+type header struct{ k, v string }
+
+func do(t *testing.T, srv *httptest.Server, method, path, token, user string, extra ...header) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(method, srv.URL+path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if user != "" {
+		req.Header.Set("X-User-Id", user)
+	}
+	for _, h := range extra {
+		req.Header.Set(h.k, h.v)
+	}
+	res, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = res.Body.Close() })
+	return res
+}
+
+func assertCode(t *testing.T, res *http.Response, code string) {
+	t.Helper()
+	var env struct {
+		Error struct {
+			Code      string `json:"code"`
+			RequestID string `json:"request_id"`
+		} `json:"error"`
+	}
+	body := readBody(t, res)
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatal(err)
+	}
+	if env.Error.Code != code {
+		t.Fatalf("code %s body %s", env.Error.Code, body)
+	}
+	if env.Error.RequestID == "" || env.Error.RequestID != res.Header.Get("X-Request-ID") {
+		t.Fatalf("request id body %q header %q", env.Error.RequestID, res.Header.Get("X-Request-ID"))
+	}
+}
+
+func readBody(t *testing.T, res *http.Response) []byte {
+	t.Helper()
+	b, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func callCount(mu *sync.Mutex, calls *int) int {
+	mu.Lock()
+	defer mu.Unlock()
+	return *calls
+}
+
+func headerHas(h http.Header, needle string) bool {
+	for k, vals := range h {
+		if strings.Contains(k, needle) {
+			return true
+		}
+		for _, v := range vals {
+			if v == needle {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func openStore(t *testing.T) *accounts.Store {
+	t.Helper()
+	s, err := accounts.Open(filepath.Join(t.TempDir(), "op.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	return s
+}
+
+func mustRoutes(t *testing.T, upstream string) []Route {
+	t.Helper()
+	specs := []struct {
+		path, requires string
+		methods        []string
+	}{
+		{"/api/organizations", "user", []string{"GET"}},
+		{"/api/organizations/{organization_id}", "user", []string{"GET"}},
+		{"/api/widgets/{organization_id}", "organization", []string{"GET"}},
+		{"/api/public", "none", []string{"GET"}},
+	}
+	out := make([]Route, 0, len(specs))
+	for _, spec := range specs {
+		rt, err := compile(spec.path, spec.methods, upstream, spec.requires)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, rt)
+	}
+	return out
+}

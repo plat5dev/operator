@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Operator</title>
+  <style>
+    body { font: 16px/1.4 ui-sans-serif, system-ui, sans-serif; margin: 2rem auto; max-width: 40rem; padding: 0 1rem; }
+    label { display: block; margin-top: 0.8rem; }
+    input { width: 100%; box-sizing: border-box; margin-top: 0.2rem; padding: 0.4rem; }
+    button { margin-top: 1rem; }
+    pre { white-space: pre-wrap; word-break: break-word; background: #f4f4f4; padding: 0.8rem; }
+    p.msg { font-size: 1.1rem; }
+  </style>
+</head>
+<body>
+  <h1>Operator</h1>
+  <form id="login">
+    <label>Email <input name="email" type="email" autocomplete="username" required></label>
+    <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+    <button type="submit">Log in</button>
+  </form>
+  <form id="call" hidden>
+    <label>Customer user id <input name="user_id" required autocomplete="off"></label>
+    <p>Not your operator login.</p>
+    <button type="submit">GET /api/organizations</button>
+  </form>
+  <p class="msg" id="msg"></p>
+  <pre id="out" hidden></pre>
+  <script>
+    const tokenKey = "operator_token";
+    const login = document.querySelector("#login");
+    const call = document.querySelector("#call");
+    const msg = document.querySelector("#msg");
+    const out = document.querySelector("#out");
+    function show(text, raw) {
+      msg.textContent = text || "";
+      out.hidden = !raw;
+      out.textContent = raw || "";
+    }
+    if (sessionStorage.getItem(tokenKey)) {
+      login.hidden = true;
+      call.hidden = false;
+    }
+    login.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const body = {
+        email: login.email.value,
+        password: login.password.value
+      };
+      const res = await fetch("/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const raw = await res.text();
+      if (!res.ok) {
+        let text = "Authentication required.";
+        try { text = JSON.parse(raw).error.message || text; } catch (e) {}
+        show(text, raw);
+        return;
+      }
+      sessionStorage.setItem(tokenKey, JSON.parse(raw).token);
+      login.hidden = true;
+      call.hidden = false;
+      show("", "");
+    });
+    call.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const res = await fetch("/api/organizations", {
+        headers: {
+          Authorization: "Bearer " + sessionStorage.getItem(tokenKey),
+          "X-User-Id": call.user_id.value.trim()
+        }
+      });
+      const raw = await res.text();
+      let text = res.status + " " + (res.headers.get("X-Request-ID") || "");
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed.error && parsed.error.message) text = parsed.error.message;
+      } catch (e) {}
+      show(text, raw);
+    });
+  </script>
+</body>
+</html>

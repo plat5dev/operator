@@ -1,0 +1,22 @@
+services:
+  operator:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:5004:5004"
+    env_file:
+      - .env
+    volumes:
+      - operator_data:/data
+    networks:
+      - plat5
+    restart: unless-stopped
+
+volumes:
+  operator_data:
+
+networks:
+  plat5:
+    external: true
+    name: plat5_plat5

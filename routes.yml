@@ -1,0 +1,9 @@
+routes:
+  - path: /api/organizations
+    methods: [GET]
+    upstream: http://identity:3000
+    requires: user
+  - path: /api/organizations/{organization_id}
+    methods: [GET]
+    upstream: http://identity:3000
+    requires: user
