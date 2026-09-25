@@ -1,9 +1,45 @@
 routes:
   - path: /api/organizations
-    methods: [GET]
+    methods: [GET, POST]
     upstream: http://identity:3000
     requires: user
   - path: /api/organizations/{organization_id}
-    methods: [GET]
+    methods: [GET, PATCH, DELETE]
+    upstream: http://identity:3000
+    requires: user
+  - path: /api/organizations/{organization_id}/members
+    methods: [GET, POST]
+    upstream: http://identity:3000
+    requires: user
+  - path: /api/organizations/{organization_id}/members/{member_id}
+    methods: [GET, PATCH, DELETE]
+    upstream: http://identity:3000
+    requires: user
+  - path: /api/organizations/{organization_id}/members/{member_id}/api-keys
+    methods: [GET, POST]
+    upstream: http://identity:3000
+    requires: user
+  - path: /api/organizations/{organization_id}/members/{member_id}/api-keys/{key_id}
+    methods: [DELETE]
+    upstream: http://identity:3000
+    requires: user
+  - path: /api/organizations/{organization_id}/invites
+    methods: [GET, POST]
+    upstream: http://identity:3000
+    requires: user
+  - path: /api/organizations/{organization_id}/invites/{invite_id}
+    methods: [DELETE]
+    upstream: http://identity:3000
+    requires: user
+  - path: /api/invites/redeem
+    methods: [POST]
+    upstream: http://identity:3000
+    requires: user
+  - path: /api/organizations/{organization_id}/service-accounts
+    methods: [GET, POST]
+    upstream: http://identity:3000
+    requires: user
+  - path: /api/organizations/{organization_id}/service-accounts/{service_account_id}
+    methods: [GET, PATCH, DELETE]
     upstream: http://identity:3000
     requires: user
