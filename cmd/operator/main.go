@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -45,15 +46,14 @@ func main() {
 		log.Error("routes", "err", err)
 		os.Exit(1)
 	}
-
-	mux := http.NewServeMux()
-	mux.Handle("POST /login", accounts.LoginHandler(store, log))
-	mux.Handle("GET /{$}", console.Handler())
-	mux.Handle("/", gateway.Proxy(store, routes, log))
+	assets := env("CONSOLE_ASSETS", "console/dist")
+	if _, err := os.Stat(filepath.Join(assets, "index.html")); err != nil {
+		log.Error("console", "dir", assets, "err", err)
+	}
 
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           guard(apierr.Middleware(mux), log),
+		Handler:           guard(apierr.Middleware(newHandler(store, routes, log, assets)), log),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -69,6 +69,17 @@ func main() {
 		log.Error("listen", "err", err)
 		os.Exit(1)
 	}
+}
+
+func newHandler(store *accounts.Store, routes []gateway.Route, log *slog.Logger, assets string) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("POST /login", accounts.LoginHandler(store, log))
+	mux.Handle("POST /logout", accounts.LogoutHandler(store, log))
+	mux.Handle("GET /session", accounts.SessionHandler(store, log))
+	mux.Handle("POST /account/password", accounts.PasswordHandler(store, log))
+	mux.Handle("/api/", gateway.Proxy(store, routes, log))
+	mux.Handle("/", console.Handler(assets))
+	return mux
 }
 
 func env(key, fallback string) string {

@@ -45,7 +45,7 @@ Do not add these because they would be convenient:
 | Work | Ready when |
 |------|------------|
 | RBAC | An operator must be unable to name some target or call some route. Until then every authenticated operator is allowed. |
-| Module host | A second UI must ship without a change to this repo. Until then one console. |
+| Module host | A customer page must appear from deploy config without a change to this repo. Until then the console serves only its own pages. |
 | Shared route source with the customer route-registry | Hand-copied upstream URLs cause a real mismatch. Until then this gateway owns its list. |
 | Identity actions the target user cannot perform | An operator must do something that user's role forbids. Until then injecting their id is the call. |
 | Customer login provisioning | Operators must create customer logins. No mechanism is reserved here. |

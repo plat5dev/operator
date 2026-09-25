@@ -2,3 +2,5 @@
 compose
 *.md
 operator.db
+console/node_modules
+console/dist

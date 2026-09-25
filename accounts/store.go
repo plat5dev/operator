@@ -147,14 +147,83 @@ func (s *Store) Authenticate(token string) (string, bool, error) {
 	return id, true, nil
 }
 
+func (s *Store) Email(id string) (string, bool, error) {
+	var email string
+	err := s.db.QueryRow(`SELECT email FROM operators WHERE id = ?`, id).Scan(&email)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return email, true, nil
+}
+
+func (s *Store) Revoke(token string) error {
+	if token == "" {
+		return nil
+	}
+	_, err := s.db.Exec(`DELETE FROM tokens WHERE token_hash = ?`, hashToken(token))
+	return err
+}
+
+func (s *Store) ChangePassword(id, current, next string) (string, error) {
+	if next == "" {
+		return "", errInvalid
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var hash string
+	err = tx.QueryRow(`SELECT password_hash FROM operators WHERE id = ?`, id).Scan(&hash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", errUnauthorized
+	}
+	if err != nil {
+		return "", err
+	}
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(current)) != nil {
+		return "", errUnauthorized
+	}
+	nextHash, err := bcrypt.GenerateFromPassword([]byte(next), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	if _, err = tx.Exec(`UPDATE operators SET password_hash = ? WHERE id = ?`, string(nextHash), id); err != nil {
+		return "", err
+	}
+	if _, err = tx.Exec(`DELETE FROM tokens WHERE operator_id = ?`, id); err != nil {
+		return "", err
+	}
+	token, err := issue(tx, id)
+	if err != nil {
+		return "", err
+	}
+	if err = tx.Commit(); err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
 func (s *Store) issue(operatorID string) (string, error) {
+	return issue(s.db, operatorID)
+}
+
+func issue(db execer, operatorID string) (string, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", err
 	}
 	token := base64.RawURLEncoding.EncodeToString(raw)
 	exp := time.Now().UTC().Add(tokenTTL).Format(time.RFC3339Nano)
-	_, err := s.db.Exec(
+	_, err := db.Exec(
 		`INSERT INTO tokens (token_hash, operator_id, expires_at) VALUES (?, ?, ?)`,
 		hashToken(token), operatorID, exp,
 	)
@@ -173,8 +242,15 @@ func normalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }
 
-var errUnauthorized = errors.New("unauthorized")
+var (
+	errUnauthorized = errors.New("unauthorized")
+	errInvalid      = errors.New("invalid")
+)
 
 func IsUnauthorized(err error) bool {
 	return errors.Is(err, errUnauthorized)
+}
+
+func IsInvalid(err error) bool {
+	return errors.Is(err, errInvalid)
 }

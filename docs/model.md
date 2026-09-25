@@ -27,12 +27,14 @@ No actor header is injected. A service that branches on "was this an operator?" 
 
 ## Injection
 
-The operator client sends the target headers to **this** gateway, with the operator bearer token.
+The operator client sends the target headers to **this** gateway, with an operator credential.
+
+The browser credential is an httpOnly cookie. The cookie value is the bearer token. JavaScript does not read it. Any other client sends `Authorization: Bearer`. If both are present, the bearer is the credential.
 
 1. Missing or bad operator credential → **401** `UNAUTHORIZED`. Target headers are not forwarded.
-2. This gateway strips client identity headers and the operator credential.
+2. This gateway strips client identity headers, `Authorization`, and `Cookie`.
 3. It re-injects only the target the authenticated operator declared, and only the headers the route requires.
-4. The upstream does not see `Authorization`.
+4. The upstream does not see the operator credential.
 
 | Route requires | Headers |
 |----------------|---------|

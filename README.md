@@ -14,6 +14,8 @@ docker compose -f compose/docker-compose.yml --env-file compose/.env up -d --bui
 
 Listens on `127.0.0.1:5004`. The route list is `routes.yml`.
 
+The console is served by this process. The image builds it. For a local binary, build `console/` (`npm ci && npm run build`) and run from the repo root so `console/dist` is found.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

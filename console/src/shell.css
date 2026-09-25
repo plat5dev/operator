@@ -1,0 +1,46 @@
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+.shell-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 20px;
+  box-sizing: border-box;
+}
+
+.shell-bar-start {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.shell-page {
+  padding: 24px 32px;
+  max-width: 720px;
+}
+
+.shell-center,
+.login {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login {
+  padding: 24px 16px;
+  box-sizing: border-box;
+}
+
+.login form {
+  width: min(420px, 100%);
+}

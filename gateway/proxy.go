@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/plat5dev/operator/accounts"
 	"github.com/plat5dev/operator/internal/apierr"
 )
 
@@ -34,6 +35,7 @@ func Proxy(auth Authenticator, routes []Route, log *slog.Logger) http.Handler {
 			pr.Out.Host = rt.route.Upstream.Host
 			h := pr.Out.Header
 			h.Del("Authorization")
+			h.Del("Cookie")
 			h.Del("Proxy-Authorization")
 			h.Del("X-Api-Key")
 			h.Del("X-User-Id")
@@ -64,7 +66,7 @@ func Proxy(auth Authenticator, routes []Route, log *slog.Logger) http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rid := apierr.From(r.Context())
-		token, ok := bearer(r.Header.Get("Authorization"))
+		token, ok := accounts.TokenFromRequest(r)
 		if !ok {
 			apierr.Unauthorized(w)
 			return
@@ -148,18 +150,6 @@ type matched struct {
 	userID   string
 	orgID    string
 	memberID string
-}
-
-func bearer(header string) (string, bool) {
-	parts := strings.SplitN(strings.TrimSpace(header), " ", 2)
-	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-		return "", false
-	}
-	token := strings.TrimSpace(parts[1])
-	if token == "" || strings.ContainsAny(token, " \r\n") {
-		return "", false
-	}
-	return token, true
 }
 
 func cleanHeader(v string) (string, bool) {

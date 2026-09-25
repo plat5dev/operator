@@ -163,6 +163,60 @@ func TestProxy(t *testing.T) {
 	})
 }
 
+func TestCookieCredential(t *testing.T) {
+	var got http.Header
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer up.Close()
+
+	store := openStore(t)
+	if _, err := store.Create("op@example.com", "secret"); err != nil {
+		t.Fatal(err)
+	}
+	token, err := store.Login("op@example.com", "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(apierr.Middleware(Proxy(store, mustRoutes(t, up.URL), slog.New(slog.NewJSONHandler(io.Discard, nil)))))
+	defer srv.Close()
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/api/organizations", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.AddCookie(&http.Cookie{Name: accounts.SessionCookie, Value: token})
+	req.Header.Set("X-User-Id", "user-1")
+	res, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusNoContent {
+		t.Fatalf("cookie auth status %d", res.StatusCode)
+	}
+	if got.Get("Cookie") != "" || got.Get("Authorization") != "" || got.Get("X-User-Id") != "user-1" {
+		t.Fatalf("upstream headers %v", got)
+	}
+
+	req, err = http.NewRequest(http.MethodGet, srv.URL+"/api/organizations", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer nope")
+	req.AddCookie(&http.Cookie{Name: accounts.SessionCookie, Value: token})
+	req.Header.Set("X-User-Id", "user-1")
+	res, err = srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("bearer should win: %d", res.StatusCode)
+	}
+}
+
 func TestDialFailure(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
