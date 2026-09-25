@@ -33,8 +33,15 @@ func TestPagesAreNotTheGateway(t *testing.T) {
 	log := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	h := apierr.Middleware(newHandler(store, nil, log, assets))
 
-	req := httptest.NewRequest(http.MethodGet, "/account", nil)
+	req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
 	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ready %d %s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/account", nil)
+	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "[]") {
 		t.Fatalf("page %d %s", rec.Code, rec.Body.String())

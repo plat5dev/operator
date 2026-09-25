@@ -77,6 +77,9 @@ func newHandler(store *accounts.Store, routes []gateway.Route, log *slog.Logger,
 	mux.Handle("POST /logout", accounts.LogoutHandler(store, log))
 	mux.Handle("GET /session", accounts.SessionHandler(store, log))
 	mux.Handle("POST /account/password", accounts.PasswordHandler(store, log))
+	mux.HandleFunc("GET /health/ready", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
 	mux.Handle("/api/", gateway.Proxy(store, routes, log))
 	mux.Handle("/", console.Handler(assets))
 	return mux

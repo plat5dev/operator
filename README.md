@@ -6,13 +6,14 @@ The customer gateway derives `X-User-Id` or `X-Organization-Id` / `X-Member-Id` 
 
 Not part of the plat5 repo. Does not call the customer gateway. Services stay off the public internet; this process is a front door of its own.
 
-Contract: [`docs/`](docs/). Invariants: [`AGENTS.md`](AGENTS.md).
+Contract: [`docs/`](docs/). Invariants: [`AGENTS.md`](AGENTS.md). Run it: [`compose/`](compose/).
 
 ```bash
-docker compose -f compose/docker-compose.yml --env-file compose/.env up -d --build
+cd compose
+docker compose up --build
 ```
 
-Listens on `127.0.0.1:5004`. The route list is `routes.yml`.
+Listens on `:5004`. The route list is `routes.yml` (mount a deployment copy in prod). Image: `ghcr.io/plat5dev/operator` on `v*` tags.
 
 The console is served by this process. The image builds it. For a local binary, build `console/` (`npm ci && npm run build`) and run from the repo root so `console/dist` is found.
 
@@ -28,8 +29,9 @@ MIT — see [LICENSE](LICENSE).
 | `accounts/` | Operator directory. |
 | `gateway/` | Operator front door. |
 | `console/` | Web UI. |
+| `compose/` | Dev and prod compose. |
 
-Those three are the first slice ([`docs/v1.md`](docs/v1.md)).
+Those first three are the first slice ([`docs/v1.md`](docs/v1.md)).
 
 ## Docs
 

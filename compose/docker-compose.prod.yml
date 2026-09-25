@@ -1,3 +1,6 @@
+# Production stack — pulls ghcr.io/plat5dev/operator:${OPERATOR_VERSION}.
+# Pin: OPERATOR_VERSION (tag from this repo's v* releases, e.g. v0.1.0).
+# Build locally: add -f docker-compose.prod.build.yml and --build.
 name: operator
 
 volumes:
@@ -9,10 +12,7 @@ networks:
 
 services:
   operator:
-    build:
-      context: ..
-      dockerfile: Dockerfile
-      target: prod
+    image: ghcr.io/plat5dev/operator:${OPERATOR_VERSION:-v0.1.0}
     labels:
       service.name: operator
       service.namespace: operator
@@ -28,15 +28,15 @@ services:
       OTEL_SERVICE_NAME: operator
       OTEL_SERVICE_NAMESPACE: operator
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
-      DEPLOYMENT_ENV: docker
+      DEPLOYMENT_ENV: prod
     volumes:
       - operator_data:/data
     networks:
       - operator
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5004/health/ready"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     restart: unless-stopped
