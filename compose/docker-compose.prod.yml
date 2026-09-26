@@ -1,5 +1,5 @@
 # Production stack — pulls ghcr.io/plat5dev/operator:${OPERATOR_VERSION}.
-# Pin: OPERATOR_VERSION (tag from this repo's v* releases, e.g. v0.1.0).
+# Pin: OPERATOR_VERSION (tag from this repo's v* releases, e.g. v0.2.0).
 # Build locally: add -f docker-compose.prod.build.yml and --build.
 name: operator
 
@@ -12,7 +12,7 @@ networks:
 
 services:
   operator:
-    image: ghcr.io/plat5dev/operator:${OPERATOR_VERSION:-v0.1.0}
+    image: ghcr.io/plat5dev/operator:${OPERATOR_VERSION:-v0.2.0}
     labels:
       service.name: operator
       service.namespace: operator

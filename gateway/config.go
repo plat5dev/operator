@@ -10,19 +10,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type Requires string
-
-const (
-	RequiresUser         Requires = "user"
-	RequiresOrganization Requires = "organization"
-	RequiresNone         Requires = "none"
-)
-
 type Route struct {
 	Path     string
 	Methods  []string
 	Upstream *url.URL
-	Requires Requires
 	re       *regexp.Regexp
 }
 
@@ -31,7 +22,6 @@ type file struct {
 		Path     string   `yaml:"path"`
 		Methods  []string `yaml:"methods"`
 		Upstream string   `yaml:"upstream"`
-		Requires string   `yaml:"requires"`
 	} `yaml:"routes"`
 }
 
@@ -50,7 +40,7 @@ func Load(path string) ([]Route, error) {
 	seen := map[string]struct{}{}
 	out := make([]Route, 0, len(doc.Routes))
 	for _, item := range doc.Routes {
-		rt, err := compile(item.Path, item.Methods, item.Upstream, item.Requires)
+		rt, err := compile(item.Path, item.Methods, item.Upstream)
 		if err != nil {
 			return nil, err
 		}
@@ -66,7 +56,7 @@ func Load(path string) ([]Route, error) {
 	return out, nil
 }
 
-func compile(path string, methods []string, upstream, requires string) (Route, error) {
+func compile(path string, methods []string, upstream string) (Route, error) {
 	if path == "" || !strings.HasPrefix(path, "/") || strings.Contains(path, "?") {
 		return Route{}, fmt.Errorf("bad route path %q", path)
 	}
@@ -80,12 +70,6 @@ func compile(path string, methods []string, upstream, requires string) (Route, e
 			return Route{}, fmt.Errorf("route %s has an empty method", path)
 		}
 		norm[i] = method
-	}
-	req := Requires(requires)
-	switch req {
-	case RequiresUser, RequiresOrganization, RequiresNone:
-	default:
-		return Route{}, fmt.Errorf("route %s requires %q", path, requires)
 	}
 	if !strings.Contains(upstream, "://") {
 		upstream = "http://" + upstream
@@ -102,7 +86,7 @@ func compile(path string, methods []string, upstream, requires string) (Route, e
 	if err != nil {
 		return Route{}, err
 	}
-	return Route{Path: path, Methods: norm, Upstream: u, Requires: req, re: re}, nil
+	return Route{Path: path, Methods: norm, Upstream: u, re: re}, nil
 }
 
 func pathRegexp(path string) (*regexp.Regexp, error) {

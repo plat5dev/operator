@@ -80,7 +80,11 @@ func newHandler(store *accounts.Store, routes []gateway.Route, log *slog.Logger,
 	mux.HandleFunc("GET /health/ready", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	mux.Handle("/api/", gateway.Proxy(store, routes, log))
+	proxy := gateway.Proxy(store, routes, log)
+	mux.Handle("/users/", proxy)
+	mux.Handle("/organizations", proxy)
+	mux.Handle("/organizations/", proxy)
+	mux.Handle("/members/", proxy)
 	mux.Handle("/", console.Handler(assets))
 	return mux
 }

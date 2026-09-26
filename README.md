@@ -2,7 +2,7 @@
 
 Second front door for a Plat5 deployment. Operators sign in here and call the same private service APIs the customer gateway fronts.
 
-The customer gateway derives `X-User-Id` or `X-Organization-Id` / `X-Member-Id` from the caller's credential. This gateway authenticates an operator, then injects those headers as the **target** the action applies to. Who performed the action is this plane's record, not a header the service branches on.
+The customer gateway fills the subject into the path. This gateway authenticates an operator, then forwards the path the operator named. That path is the target. Who performed the action is this plane's record, not something the service branches on.
 
 Not part of the plat5 repo. Does not call the customer gateway. Services stay off the public internet; this process is a front door of its own.
 
@@ -37,5 +37,5 @@ Those first three are the first slice ([`docs/v1.md`](docs/v1.md)).
 
 | Doc | Contents |
 |-----|----------|
-| [`docs/model.md`](docs/model.md) | Planes, target headers, attribution |
+| [`docs/model.md`](docs/model.md) | Planes, the path as the target, attribution |
 | [`docs/v1.md`](docs/v1.md) | First slice, the hole it accepts, what waits |

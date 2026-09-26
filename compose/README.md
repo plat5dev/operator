@@ -20,7 +20,7 @@ Sample routes in the image target `http://identity:3000`. Attach this project to
 Pull the published image (`ghcr.io/plat5dev/operator:${OPERATOR_VERSION}`; tags from this repo’s `v*` releases):
 
 ```bash
-cp .env.template .env   # set OPERATOR_VERSION=v0.1.0 and any bootstrap/routes
+cp .env.template .env   # set OPERATOR_VERSION=v0.2.0 and any bootstrap/routes
 docker compose -f docker-compose.prod.yml --env-file .env up -d
 ```
 

@@ -16,14 +16,13 @@ Read the doc, don’t re-derive:
 
 | Invariant | Where |
 |-----------|--------|
-| Operator is the actor. Upstream identity headers are the target, not the actor | [`docs/model.md`](docs/model.md) |
-| Operator id is never written as `X-User-Id` | model |
-| Client declares the target. Gateway strips, then re-injects only after operator authn | model |
-| Path organization id must match `X-Organization-Id` | model |
-| Own route list. Same upstreams. No customer gateway, no route-registry | model |
-| Attribution is this gateway's log: operator id, request id, target headers | model |
+| Operator is the actor. The path is the target, not the actor | [`docs/model.md`](docs/model.md) |
+| Operator id is never written into the path | model |
+| Client names the target in the path. Gateway authenticates, strips the operator credential, forwards the path | model |
+| Own route list of identity URLs. No customer gateway, no route-registry | model |
+| Attribution is this gateway's log: operator id, request id, target ids from the path | model |
 | Any authenticated operator may name any target on any configured route | [`docs/v1.md`](docs/v1.md) |
-| Identity's public API still enforces the injected user's role | model |
+| Who may call identity is this proxy. Identity refuses illegal states only | model |
 | Errors use the Plat5 envelope | model |
 
 ## Stop conditions
@@ -37,7 +36,6 @@ Do not add these because they would be convenient:
 - A module host, remote UI loader, or customer-API admin packaged in this repo
 - Changes to plat5 or Auth in the first slice
 - Minting customer credentials, or writing another product's database
-- Treating a missing target header as a downstream 500
 - Wrapping the customer route-registry admin token
 
 ## Deferred
@@ -47,7 +45,6 @@ Do not add these because they would be convenient:
 | RBAC | An operator must be unable to name some target or call some route. Until then every authenticated operator is allowed. |
 | Module host | A customer page must appear from deploy config without a change to this repo. Until then the console serves only its own pages. |
 | Shared route source with the customer route-registry | Hand-copied upstream URLs cause a real mismatch. Until then this gateway owns its list. |
-| Identity actions the target user cannot perform | An operator must do something that user's role forbids. Until then injecting their id is the call. |
 | Customer login provisioning | Operators must create customer logins. No mechanism is reserved here. |
 
 ## Siblings

@@ -25,7 +25,7 @@ func TestProxy(t *testing.T) {
 		mu.Lock()
 		calls++
 		got = r.Header.Clone()
-		gotPath = r.URL.Path
+		gotPath = r.URL.RequestURI()
 		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
@@ -49,24 +49,15 @@ func TestProxy(t *testing.T) {
 
 	t.Run("missing credential does not dial", func(t *testing.T) {
 		before := callCount(&mu, &calls)
-		res := do(t, srv, http.MethodGet, "/api/organizations", "", "")
+		res := do(t, srv, http.MethodGet, "/users/user-1/memberships", "")
 		if res.StatusCode != http.StatusUnauthorized || callCount(&mu, &calls) != before {
 			t.Fatalf("status %d calls %d", res.StatusCode, callCount(&mu, &calls))
 		}
 		assertCode(t, res, "UNAUTHORIZED")
 	})
 
-	t.Run("missing target does not dial", func(t *testing.T) {
-		before := callCount(&mu, &calls)
-		res := do(t, srv, http.MethodGet, "/api/organizations", token, "")
-		if res.StatusCode != http.StatusBadRequest || callCount(&mu, &calls) != before {
-			t.Fatalf("status %d", res.StatusCode)
-		}
-		assertCode(t, res, "VALIDATION_ERROR")
-	})
-
-	t.Run("user route injects only the declared user", func(t *testing.T) {
-		res := do(t, srv, http.MethodGet, "/api/organizations?limit=1", token, "user-1", header{"X-Organization-Id", "org-1"}, header{"X-Request-ID", "rid-1"})
+	t.Run("forwards the path and strips the operator credential", func(t *testing.T) {
+		res := do(t, srv, http.MethodGet, "/users/user-1/memberships?limit=1", token, header{"X-Request-ID", "rid-1"}, header{"X-Api-Key", "plat5-sk-1-secret"})
 		if res.StatusCode != http.StatusForbidden {
 			t.Fatalf("status %d", res.StatusCode)
 		}
@@ -79,14 +70,11 @@ func TestProxy(t *testing.T) {
 		}
 		mu.Lock()
 		defer mu.Unlock()
-		if gotPath != "/api/organizations" {
+		if gotPath != "/users/user-1/memberships?limit=1" {
 			t.Fatalf("path %s", gotPath)
 		}
-		if got.Get("X-User-Id") != "user-1" {
-			t.Fatalf("user %q", got.Get("X-User-Id"))
-		}
-		if got.Get("X-Organization-Id") != "" || got.Get("X-Member-Id") != "" || got.Get("Authorization") != "" || got.Get("X-Api-Key") != "" {
-			t.Fatalf("forwarded identity or credential: %v", got)
+		if got.Get("Authorization") != "" || got.Get("X-Api-Key") != "" || got.Get("Cookie") != "" {
+			t.Fatalf("forwarded credential: %v", got)
 		}
 		if got.Get("X-Request-ID") != "rid-1" {
 			t.Fatalf("upstream request id %q", got.Get("X-Request-ID"))
@@ -96,57 +84,24 @@ func TestProxy(t *testing.T) {
 		}
 	})
 
-	t.Run("path org mismatch does not dial", func(t *testing.T) {
-		before := callCount(&mu, &calls)
-		res := do(t, srv, http.MethodGet, "/api/organizations/org-1", token, "user-1", header{"X-Organization-Id", "org-2"})
-		if res.StatusCode != http.StatusBadRequest || callCount(&mu, &calls) != before {
-			t.Fatalf("status %d", res.StatusCode)
-		}
-		assertCode(t, res, "VALIDATION_ERROR")
-	})
-
-	t.Run("user route does not forward a matching org header", func(t *testing.T) {
-		res := do(t, srv, http.MethodGet, "/api/organizations/org-1", token, "user-1", header{"X-Organization-Id", "org-1"})
+	t.Run("forwards an org path", func(t *testing.T) {
+		res := do(t, srv, http.MethodGet, "/organizations/org-9", token)
 		if res.StatusCode != http.StatusForbidden {
 			t.Fatalf("status %d", res.StatusCode)
 		}
 		mu.Lock()
 		defer mu.Unlock()
-		if got.Get("X-User-Id") != "user-1" || got.Get("X-Organization-Id") != "" {
-			t.Fatalf("headers %v", got)
-		}
-	})
-
-	t.Run("organization route injects org and member only", func(t *testing.T) {
-		res := do(t, srv, http.MethodGet, "/api/widgets/org-9", token, "user-1", header{"X-Organization-Id", "org-9"}, header{"X-Member-Id", "mem-1"})
-		if res.StatusCode != http.StatusForbidden {
-			t.Fatalf("status %d", res.StatusCode)
-		}
-		mu.Lock()
-		defer mu.Unlock()
-		if got.Get("X-Organization-Id") != "org-9" || got.Get("X-Member-Id") != "mem-1" || got.Get("X-User-Id") != "" {
-			t.Fatalf("headers %v", got)
+		if gotPath != "/organizations/org-9" {
+			t.Fatalf("path %s", gotPath)
 		}
 		if headerHas(got, operatorID) {
 			t.Fatal("operator id was forwarded")
 		}
 	})
 
-	t.Run("none route injects nothing", func(t *testing.T) {
-		res := do(t, srv, http.MethodGet, "/api/public", token, "user-1", header{"X-Organization-Id", "org-1"}, header{"X-Member-Id", "mem-1"})
-		if res.StatusCode != http.StatusForbidden {
-			t.Fatalf("status %d", res.StatusCode)
-		}
-		mu.Lock()
-		defer mu.Unlock()
-		if got.Get("X-User-Id") != "" || got.Get("X-Organization-Id") != "" || got.Get("X-Member-Id") != "" || got.Get("Authorization") != "" {
-			t.Fatalf("headers %v", got)
-		}
-	})
-
 	t.Run("unknown route", func(t *testing.T) {
 		before := callCount(&mu, &calls)
-		res := do(t, srv, http.MethodPost, "/api/organizations", token, "user-1")
+		res := do(t, srv, http.MethodPost, "/users/user-1/memberships", token)
 		if res.StatusCode != http.StatusNotFound || callCount(&mu, &calls) != before {
 			t.Fatalf("status %d", res.StatusCode)
 		}
@@ -156,7 +111,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("generates request id", func(t *testing.T) {
-		res := do(t, srv, http.MethodGet, "/api/organizations", token, "user-1")
+		res := do(t, srv, http.MethodGet, "/organizations", token)
 		if res.Header.Get("X-Request-ID") == "" {
 			t.Fatal("missing request id")
 		}
@@ -182,12 +137,11 @@ func TestCookieCredential(t *testing.T) {
 	srv := httptest.NewServer(apierr.Middleware(Proxy(store, mustRoutes(t, up.URL), slog.New(slog.NewJSONHandler(io.Discard, nil)))))
 	defer srv.Close()
 
-	req, err := http.NewRequest(http.MethodGet, srv.URL+"/api/organizations", nil)
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/organizations", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.AddCookie(&http.Cookie{Name: accounts.SessionCookie, Value: token})
-	req.Header.Set("X-User-Id", "user-1")
 	res, err := srv.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -196,17 +150,16 @@ func TestCookieCredential(t *testing.T) {
 	if res.StatusCode != http.StatusNoContent {
 		t.Fatalf("cookie auth status %d", res.StatusCode)
 	}
-	if got.Get("Cookie") != "" || got.Get("Authorization") != "" || got.Get("X-User-Id") != "user-1" {
+	if got.Get("Cookie") != "" || got.Get("Authorization") != "" {
 		t.Fatalf("upstream headers %v", got)
 	}
 
-	req, err = http.NewRequest(http.MethodGet, srv.URL+"/api/organizations", nil)
+	req, err = http.NewRequest(http.MethodGet, srv.URL+"/organizations", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.Header.Set("Authorization", "Bearer nope")
 	req.AddCookie(&http.Cookie{Name: accounts.SessionCookie, Value: token})
-	req.Header.Set("X-User-Id", "user-1")
 	res, err = srv.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -236,7 +189,7 @@ func TestDialFailure(t *testing.T) {
 	routes := mustRoutes(t, "http://"+addr)
 	srv := httptest.NewServer(apierr.Middleware(Proxy(store, routes, slog.New(slog.NewJSONHandler(io.Discard, nil)))))
 	defer srv.Close()
-	res := do(t, srv, http.MethodGet, "/api/organizations", token, "user-1")
+	res := do(t, srv, http.MethodGet, "/organizations", token)
 	if res.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("status %d", res.StatusCode)
 	}
@@ -245,7 +198,7 @@ func TestDialFailure(t *testing.T) {
 
 type header struct{ k, v string }
 
-func do(t *testing.T, srv *httptest.Server, method, path, token, user string, extra ...header) *http.Response {
+func do(t *testing.T, srv *httptest.Server, method, path, token string, extra ...header) *http.Response {
 	t.Helper()
 	req, err := http.NewRequest(method, srv.URL+path, nil)
 	if err != nil {
@@ -253,9 +206,6 @@ func do(t *testing.T, srv *httptest.Server, method, path, token, user string, ex
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	if user != "" {
-		req.Header.Set("X-User-Id", user)
 	}
 	for _, h := range extra {
 		req.Header.Set(h.k, h.v)
@@ -330,17 +280,16 @@ func openStore(t *testing.T) *accounts.Store {
 func mustRoutes(t *testing.T, upstream string) []Route {
 	t.Helper()
 	specs := []struct {
-		path, requires string
-		methods        []string
+		path    string
+		methods []string
 	}{
-		{"/api/organizations", "user", []string{"GET"}},
-		{"/api/organizations/{organization_id}", "user", []string{"GET"}},
-		{"/api/widgets/{organization_id}", "organization", []string{"GET"}},
-		{"/api/public", "none", []string{"GET"}},
+		{"/users/{user_id}/memberships", []string{"GET"}},
+		{"/organizations/{organization_id}", []string{"GET"}},
+		{"/organizations", []string{"GET"}},
 	}
 	out := make([]Route, 0, len(specs))
 	for _, spec := range specs {
-		rt, err := compile(spec.path, spec.methods, upstream, spec.requires)
+		rt, err := compile(spec.path, spec.methods, upstream)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -47,7 +47,7 @@ func TestPagesAreNotTheGateway(t *testing.T) {
 		t.Fatalf("page %d %s", rec.Code, rec.Body.String())
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/api/organizations", nil)
+	req = httptest.NewRequest(http.MethodGet, "/organizations", nil)
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
