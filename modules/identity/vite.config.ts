@@ -31,12 +31,18 @@ function injectCss(): Plugin {
       const out = path.resolve("../dist/identity")
       const files = await readdir(out).catch(() => [])
       const cssFiles = files.filter((file) => file.endsWith(".css"))
+      const jsPath = path.join(out, "entry.js")
+      const js = await readFile(jsPath, "utf8")
+      // The bundle runs in the browser with no `process` global. Vite does not
+      // replace process.env in lib builds, so fail loudly instead of shipping
+      // an entry.js that throws "process is not defined" on import.
+      if (js.includes("process.env.NODE_ENV")) {
+        throw new Error("entry.js still references process.env.NODE_ENV (missing define)")
+      }
+      if (js.startsWith("const style=")) return
       if (cssFiles.length === 0) return
       let css = ""
       for (const file of cssFiles) css += await readFile(path.join(out, file), "utf8")
-      const jsPath = path.join(out, "entry.js")
-      const js = await readFile(jsPath, "utf8")
-      if (js.startsWith("const style=")) return
       const payload = JSON.stringify(css)
       await writeFile(jsPath, `const style=document.createElement("style");style.textContent=${payload};document.head.appendChild(style);\n${js}`)
       await Promise.all(cssFiles.map((file) => rm(path.join(out, file))))
@@ -46,6 +52,7 @@ function injectCss(): Plugin {
 
 export default defineConfig({
   plugins: [externalPeers(), react(), injectCss()],
+  define: { "process.env.NODE_ENV": JSON.stringify("production") },
   build: {
     outDir: "../dist/identity",
     emptyOutDir: true,
