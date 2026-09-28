@@ -13,22 +13,22 @@ func TestIdentityRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string][]string{
-		"/users/{user_id}/memberships":                                               {"GET"},
-		"/users/{user_id}/organizations":                                             {"POST"},
-		"/users/{user_id}/invites/redeem":                                            {"POST"},
-		"/users/{user_id}/api-keys":                                                  {"GET", "POST"},
-		"/users/{user_id}/api-keys/{key_id}":                                         {"DELETE"},
-		"/users/{user_id}/organizations/{organization_id}/session":                   {"POST"},
-		"/organizations":                                                             {"GET"},
-		"/organizations/{organization_id}":                                           {"GET", "PATCH", "DELETE"},
-		"/organizations/{organization_id}/members":                                   {"GET", "POST"},
-		"/organizations/{organization_id}/invites":                                   {"GET", "POST"},
-		"/organizations/{organization_id}/invites/{invite_id}":                       {"DELETE"},
-		"/organizations/{organization_id}/service-accounts":                          {"GET", "POST"},
-		"/organizations/{organization_id}/service-accounts/{service_account_id}":     {"GET", "PATCH", "DELETE"},
-		"/members/{member_id}":                                                       {"GET", "PATCH", "DELETE"},
-		"/members/{member_id}/api-keys":                                              {"GET", "POST"},
-		"/members/{member_id}/api-keys/{key_id}":                                     {"DELETE"},
+		"/users/{user_id}/memberships":                                           {"GET"},
+		"/users/{user_id}/organizations":                                         {"POST"},
+		"/users/{user_id}/invites/redeem":                                        {"POST"},
+		"/users/{user_id}/api-keys":                                              {"GET", "POST"},
+		"/users/{user_id}/api-keys/{key_id}":                                     {"DELETE"},
+		"/users/{user_id}/organizations/{organization_id}/session":               {"POST"},
+		"/organizations":                                                         {"GET"},
+		"/organizations/{organization_id}":                                       {"GET", "PATCH", "DELETE"},
+		"/organizations/{organization_id}/members":                               {"GET", "POST"},
+		"/organizations/{organization_id}/invites":                               {"GET", "POST"},
+		"/organizations/{organization_id}/invites/{invite_id}":                   {"DELETE"},
+		"/organizations/{organization_id}/service-accounts":                      {"GET", "POST"},
+		"/organizations/{organization_id}/service-accounts/{service_account_id}": {"GET", "PATCH", "DELETE"},
+		"/members/{member_id}":                                                   {"GET", "PATCH", "DELETE"},
+		"/members/{member_id}/api-keys":                                          {"GET", "POST"},
+		"/members/{member_id}/api-keys/{key_id}":                                 {"DELETE"},
 	}
 	if len(routes) != len(want) {
 		t.Fatalf("got %d routes", len(routes))
