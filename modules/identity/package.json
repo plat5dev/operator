@@ -1,26 +1,26 @@
 {
-  "name": "console",
+  "name": "identity",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "predev": "node scripts/vendor.mjs --dev",
-    "dev": "vite",
-    "prebuild": "node scripts/vendor.mjs",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "build": "tsc --noEmit && vite build"
   },
-  "dependencies": {
-    "@cloudscape-design/components": "^3.0.0",
-    "@cloudscape-design/global-styles": "^1.0.0",
+  "peerDependencies": {
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.9.0"
+  },
+  "dependencies": {
+    "@cloudscape-design/components": "3.0.1387"
   },
   "devDependencies": {
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^6.0.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-router-dom": "7.18.4",
     "typescript": "~6.0.2",
     "vite": "^8.0.0"
   }

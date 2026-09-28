@@ -8,7 +8,7 @@ How I decide: `my-principles` skill. This file is **what Operator is**. Do not c
 
 A second front door onto the private APIs a Plat5 deployment already fronts. Operator accounts, a gateway, a console.
 
-Not the customer gateway. Not an IdP. Not Plat5 identity. Not a module host.
+Not the customer gateway. Not an IdP. Not Plat5 identity. Not a remote UI loader.
 
 ## Locked
 
@@ -24,6 +24,7 @@ Read the doc, don’t re-derive:
 | Any authenticated operator may name any target on any configured route | [`docs/v1.md`](docs/v1.md) |
 | Who may call identity is this proxy. Identity refuses illegal states only | model |
 | Errors use the Plat5 envelope | model |
+| Console modules are config. The shell does not name them | [`docs/modules.md`](docs/modules.md) |
 
 ## Stop conditions
 
@@ -33,7 +34,7 @@ Do not add these because they would be convenient:
 - Proxying through the customer gateway, or publishing routes into its route map
 - Plat5 Auth, or a customer `user_id`, as an operator account
 - RBAC, per-target grants, or a policy engine in the first slice
-- A module host, remote UI loader, or customer-API admin packaged in this repo
+- A module entry that is not a file this process serves
 - Changes to plat5 or Auth in the first slice
 - Minting customer credentials, or writing another product's database
 - Wrapping the customer route-registry admin token
@@ -43,7 +44,6 @@ Do not add these because they would be convenient:
 | Work | Ready when |
 |------|------------|
 | RBAC | An operator must be unable to name some target or call some route. Until then every authenticated operator is allowed. |
-| Module host | A customer page must appear from deploy config without a change to this repo. Until then the console serves only its own pages. |
 | Shared route source with the customer route-registry | Hand-copied upstream URLs cause a real mismatch. Until then this gateway owns its list. |
 | Customer login provisioning | Operators must create customer logins. No mechanism is reserved here. |
 

@@ -10,9 +10,9 @@ import (
 	"github.com/plat5dev/operator/internal/apierr"
 )
 
-const servicesPlaceholder = "__SERVICES__"
+const modulesPlaceholder = "__MODULES__"
 
-func Handler(dir string) http.Handler {
+func Handler(dir string, modules []Module) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			apierr.NotFound(w)
@@ -24,7 +24,7 @@ func Handler(dir string) http.Handler {
 			return
 		}
 		if rel == "" || rel == "index.html" {
-			serveIndex(w, r, dir)
+			serveIndex(w, r, dir, modules)
 			return
 		}
 		full := filepath.Join(dir, filepath.FromSlash(rel))
@@ -34,7 +34,7 @@ func Handler(dir string) http.Handler {
 				apierr.NotFound(w)
 				return
 			}
-			serveIndex(w, r, dir)
+			serveIndex(w, r, dir, modules)
 			return
 		}
 		defer f.Close()
@@ -44,14 +44,14 @@ func Handler(dir string) http.Handler {
 				apierr.NotFound(w)
 				return
 			}
-			serveIndex(w, r, dir)
+			serveIndex(w, r, dir, modules)
 			return
 		}
 		http.ServeContent(w, r, st.Name(), st.ModTime(), f)
 	})
 }
 
-func serveIndex(w http.ResponseWriter, r *http.Request, dir string) {
+func serveIndex(w http.ResponseWriter, r *http.Request, dir string, modules []Module) {
 	raw, err := os.ReadFile(filepath.Join(dir, "index.html"))
 	if err != nil {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -61,7 +61,7 @@ func serveIndex(w http.ResponseWriter, r *http.Request, dir string) {
 		return
 	}
 	// The menu is not compiled into the bundle. The page reads this list.
-	body := strings.ReplaceAll(string(raw), servicesPlaceholder, "[]")
+	body := strings.ReplaceAll(string(raw), modulesPlaceholder, modulesJSON(modules))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")

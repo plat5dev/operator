@@ -46,6 +46,23 @@ func main() {
 		log.Error("routes", "err", err)
 		os.Exit(1)
 	}
+	modulesFile := env("MODULES_FILE", "modules.yml")
+	mods, err := console.LoadModules(modulesFile)
+	if err != nil {
+		log.Error("modules", "err", err)
+		os.Exit(1)
+	}
+	modulesDir := env("MODULES_DIR", "modules/dist")
+	if len(mods) > 0 {
+		st, err := os.Stat(modulesDir)
+		if err != nil || !st.IsDir() {
+			if err == nil {
+				err = errors.New("not a directory")
+			}
+			log.Error("modules", "dir", modulesDir, "err", err)
+			os.Exit(1)
+		}
+	}
 	assets := env("CONSOLE_ASSETS", "console/dist")
 	if _, err := os.Stat(filepath.Join(assets, "index.html")); err != nil {
 		log.Error("console", "dir", assets, "err", err)
@@ -53,7 +70,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           guard(apierr.Middleware(newHandler(store, routes, log, assets)), log),
+		Handler:           guard(apierr.Middleware(newHandler(store, routes, log, assets, mods, modulesDir)), log),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -71,7 +88,7 @@ func main() {
 	}
 }
 
-func newHandler(store *accounts.Store, routes []gateway.Route, log *slog.Logger, assets string) http.Handler {
+func newHandler(store *accounts.Store, routes []gateway.Route, log *slog.Logger, assets string, modules []console.Module, modulesDir string) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("POST /login", accounts.LoginHandler(store, log))
 	mux.Handle("POST /logout", accounts.LogoutHandler(store, log))
@@ -85,7 +102,8 @@ func newHandler(store *accounts.Store, routes []gateway.Route, log *slog.Logger,
 	mux.Handle("/organizations", proxy)
 	mux.Handle("/organizations/", proxy)
 	mux.Handle("/members/", proxy)
-	mux.Handle("/", console.Handler(assets))
+	mux.Handle("/modules/", console.Files(modulesDir))
+	mux.Handle("/", console.Handler(assets, modules))
 	return mux
 }
 

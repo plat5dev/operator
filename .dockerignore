@@ -4,3 +4,6 @@ compose
 operator.db
 console/node_modules
 console/dist
+console/public/vendor
+modules/identity/node_modules
+modules/dist

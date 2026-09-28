@@ -15,7 +15,7 @@ docker compose up --build
 
 Listens on `:5004`. The route list is `routes.yml` (mount a deployment copy in prod). Image: `ghcr.io/plat5dev/operator` on `v*` tags.
 
-The console is served by this process. The image builds it. For a local binary, build `console/` (`npm ci && npm run build`) and run from the repo root so `console/dist` is found.
+The console is served by this process. The image builds it, including the default identity module. For a local binary, build `modules/identity` and `console/` (`npm ci && npm run build` in each) and run from the repo root so `console/dist` and `modules/dist` are found.
 
 ## License
 
@@ -28,7 +28,9 @@ MIT — see [LICENSE](LICENSE).
 | `docs/` | Contract. Read this before adding code. |
 | `accounts/` | Operator directory. |
 | `gateway/` | Operator front door. |
-| `console/` | Web UI. |
+| `console/` | Web UI shell. |
+| `modules/` | Console modules. Identity is the default. |
+| `modules.yml` | Which modules the shell loads. |
 | `compose/` | Dev and prod compose. |
 
 Those first three are the first slice ([`docs/v1.md`](docs/v1.md)).
@@ -39,3 +41,4 @@ Those first three are the first slice ([`docs/v1.md`](docs/v1.md)).
 |-----|----------|
 | [`docs/model.md`](docs/model.md) | Planes, the path as the target, attribution |
 | [`docs/v1.md`](docs/v1.md) | First slice, the hole it accepts, what waits |
+| [`docs/modules.md`](docs/modules.md) | How a console module is loaded |

@@ -3,10 +3,10 @@ import Box from "@cloudscape-design/components/box"
 import ButtonDropdown from "@cloudscape-design/components/button-dropdown"
 import Link from "@cloudscape-design/components/link"
 import TopNavigation from "@cloudscape-design/components/top-navigation"
-import { readServices } from "./api"
+import { readModules } from "./api"
 import { useSession } from "./session"
 
-const services = readServices()
+const services = readModules()
 
 export function ShellHeader() {
   const session = useSession()
@@ -58,10 +58,10 @@ export function ShellHeader() {
   )
 }
 
-export function Well() {
+export function Well({ empty }: { empty: boolean }) {
   return (
     <div id="well" className="shell-page">
-      <Box color="text-body-secondary">No services.</Box>
+      <Box color="text-body-secondary">{empty ? "No services." : "Not found."}</Box>
     </div>
   )
 }

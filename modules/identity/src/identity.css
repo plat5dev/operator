@@ -1,0 +1,13 @@
+.identity-page {
+  padding: 24px 32px;
+  max-width: 1120px;
+}
+
+.identity-page a {
+  color: #0972d3;
+}
+
+.identity-secret {
+  word-break: break-all;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}

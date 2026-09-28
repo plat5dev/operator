@@ -4,9 +4,21 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Operator</title>
+    <script type="importmap">
+      {
+        "imports": {
+          "react": "/vendor/react.js",
+          "react-dom": "/vendor/react-dom.js",
+          "react-dom/client": "/vendor/react-dom-client.js",
+          "react/jsx-runtime": "/vendor/react-jsx-runtime.js",
+          "react/jsx-dev-runtime": "/vendor/react-jsx-dev-runtime.js",
+          "react-router-dom": "/vendor/react-router-dom.js"
+        }
+      }
+    </script>
   </head>
   <body>
-    <script type="application/json" id="operator-services">__SERVICES__</script>
+    <script type="application/json" id="operator-modules">__MODULES__</script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

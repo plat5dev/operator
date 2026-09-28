@@ -4,4 +4,6 @@
 
 The first slice, including the hole it accepts: [`v1.md`](v1.md).
 
+Console modules: [`modules.md`](modules.md).
+
 Locked invariants and stop conditions: [`../AGENTS.md`](../AGENTS.md).

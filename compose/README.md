@@ -11,9 +11,11 @@ docker compose up --build
 
 | URL | Service |
 |-----|---------|
-| `http://localhost:5004` | Console + `/api` gateway |
+| `http://localhost:5004` | Console and gateway |
 
-Sample routes in the image target `http://identity:3000`. Attach this project to a Plat5 network (or mount a route list with reachable upstreams) before calling `/api`.
+Sample routes in the image target `http://identity:3000`. Attach this project to a Plat5 network (or mount a route list with reachable upstreams) before calling those paths.
+
+The image lists the identity module. Mount another `modules.yml` to drop it, and mount module files under `/modules/{id}/`.
 
 ## Prod
 

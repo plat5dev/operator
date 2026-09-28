@@ -22,6 +22,8 @@ services:
       ADDR: ${ADDR:-:5004}
       DB_PATH: ${DB_PATH:-/data/operator.db}
       ROUTES_FILE: ${ROUTES_FILE:-/routes.yml}
+      MODULES_FILE: ${MODULES_FILE:-/modules.yml}
+      MODULES_DIR: ${MODULES_DIR:-/modules}
       CONSOLE_ASSETS: ${CONSOLE_ASSETS:-/console}
       OPERATOR_BOOTSTRAP_EMAIL: ${OPERATOR_BOOTSTRAP_EMAIL:-}
       OPERATOR_BOOTSTRAP_PASSWORD: ${OPERATOR_BOOTSTRAP_PASSWORD:-}

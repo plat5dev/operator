@@ -1,0 +1,6 @@
+# Console modules. Remove a row to drop the page. Contract: docs/modules.md.
+modules:
+  - id: identity
+    title: Identity
+    base_path: /identity
+    entry: /modules/identity/entry.js

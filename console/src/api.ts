@@ -3,10 +3,11 @@ export type Session = {
   email: string
 }
 
-export type Service = {
+export type Module = {
   id: string
   title: string
   basePath: string
+  entry: string
 }
 
 export async function errorMessage(res: Response): Promise<string> {
@@ -26,18 +27,19 @@ export async function getSession(): Promise<Session | null> {
   return (await res.json()) as Session
 }
 
-export function readServices(): Service[] {
-  const text = document.getElementById("operator-services")?.textContent?.trim() ?? ""
-  if (!text || text === "__SERVICES__") return []
+export function readModules(): Module[] {
+  const text = document.getElementById("operator-modules")?.textContent?.trim() ?? ""
+  if (!text || text === "__MODULES__") return []
   try {
     const parsed: unknown = JSON.parse(text)
     if (!Array.isArray(parsed)) return []
     return parsed.flatMap((item) => {
       if (!item || typeof item !== "object") return []
       const row = item as Record<string, unknown>
-      if (typeof row.id !== "string" || typeof row.title !== "string" || typeof row.basePath !== "string") return []
+      if (typeof row.id !== "string" || typeof row.title !== "string" || typeof row.basePath !== "string" || typeof row.entry !== "string") return []
       if (!row.basePath.startsWith("/") || row.basePath.startsWith("//")) return []
-      return [{ id: row.id, title: row.title, basePath: row.basePath }]
+      if (!row.entry.startsWith("/modules/") || row.entry.includes("..") || row.entry.includes("\\") || row.entry.includes("?") || row.entry.includes("#")) return []
+      return [{ id: row.id, title: row.title, basePath: row.basePath, entry: row.entry }]
     })
   } catch {
     return []
