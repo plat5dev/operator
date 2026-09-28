@@ -22,7 +22,7 @@ The image lists the identity module. Mount another `modules.yml` to drop it, and
 Pull the published image (`ghcr.io/plat5dev/operator:${OPERATOR_VERSION}`; tags from this repo’s `v*` releases):
 
 ```bash
-cp .env.template .env   # set OPERATOR_VERSION=v0.2.0 and any bootstrap/routes
+cp .env.template .env   # set OPERATOR_VERSION=v0.2.1 and any bootstrap/routes
 docker compose -f docker-compose.prod.yml --env-file .env up -d
 ```
 
