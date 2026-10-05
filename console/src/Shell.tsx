@@ -1,67 +1,81 @@
-import { useNavigate } from "react-router-dom"
-import Box from "@cloudscape-design/components/box"
-import ButtonDropdown from "@cloudscape-design/components/button-dropdown"
-import Link from "@cloudscape-design/components/link"
-import TopNavigation from "@cloudscape-design/components/top-navigation"
+import { DownOutlined, MoonOutlined, SunOutlined, UserOutlined } from "@ant-design/icons"
+import { Button, Dropdown, Empty, Layout } from "antd"
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom"
 import { readModules } from "./api"
 import { useSession } from "./session"
+import { useTheme } from "./theme"
 
 const services = readModules()
 
-export function ShellHeader() {
+export function ShellLayout() {
   const session = useSession()
+  const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
-  const items = services.length
-    ? services.map((service) => ({ id: service.id, text: service.title }))
-    : [{ id: "none", text: "No services", disabled: true }]
+  const { pathname } = useLocation()
+  const current = services.find((item) => pathname === item.basePath || pathname.startsWith(`${item.basePath}/`))
 
   async function logout() {
     await fetch("/logout", { method: "POST", credentials: "include" })
     navigate("/login", { replace: true })
   }
 
+  const serviceLabel = services.length === 0 ? "No services" : (current?.title ?? "Services")
+
   return (
-    <TopNavigation visualContext="top-navigation">
-      <div className="shell-bar">
-        <div className="shell-bar-start">
-          <ButtonDropdown
-            items={items}
-            ariaLabel="Services"
-            expandToViewport
-            onItemClick={({ detail }) => {
-              const service = services.find((item) => item.id === detail.id)
-              if (service) navigate(service.basePath)
-            }}
-          >
-            Services
-          </ButtonDropdown>
-          <Link href="/" variant="secondary" fontSize="heading-s">
+    <Layout className="shell-frame">
+      <Layout.Header className="shell-header">
+        <div className="shell-header-start">
+          <Link to="/" className="shell-brand">
             Operator
           </Link>
+          <Dropdown
+            disabled={services.length === 0}
+            menu={{
+              selectedKeys: current ? [current.id] : [],
+              items: services.map((service) => ({ key: service.id, label: service.title })),
+              onClick: ({ key }) => {
+                const service = services.find((item) => item.id === key)
+                if (service) navigate(service.basePath)
+              },
+            }}
+          >
+            <Button type="text" className="shell-services" disabled={services.length === 0} icon={<DownOutlined />} iconPosition="end">
+              <span className="shell-services-label">{serviceLabel}</span>
+            </Button>
+          </Dropdown>
         </div>
-        <ButtonDropdown
-          items={[
-            { id: "account", text: "Account settings" },
-            { id: "logout", text: "Log out" },
-          ]}
-          ariaLabel="Account"
-          expandToViewport
-          onItemClick={({ detail }) => {
-            if (detail.id === "account") navigate("/account")
-            if (detail.id === "logout") void logout()
-          }}
-        >
-          {session.email}
-        </ButtonDropdown>
-      </div>
-    </TopNavigation>
+        <div className="shell-header-end">
+          <Button
+            type="text"
+            aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            icon={theme === "dark" ? <SunOutlined /> : <MoonOutlined />}
+            onClick={toggleTheme}
+          />
+          <Dropdown
+            menu={{
+              items: [
+                { key: "account", label: "Account settings" },
+                { key: "logout", label: "Log out" },
+              ],
+              onClick: ({ key }) => {
+                if (key === "account") navigate("/account")
+                if (key === "logout") void logout()
+              },
+            }}
+          >
+            <Button type="text" icon={<UserOutlined />}>
+              <span className="shell-account">{session.email}</span>
+            </Button>
+          </Dropdown>
+        </div>
+      </Layout.Header>
+      <Layout.Content className="shell-content">
+        <Outlet />
+      </Layout.Content>
+    </Layout>
   )
 }
 
 export function Well({ empty }: { empty: boolean }) {
-  return (
-    <div id="well" className="shell-page">
-      <Box color="text-body-secondary">{empty ? "No services." : "Not found."}</Box>
-    </div>
-  )
+  return <Empty description={empty ? "No services." : "Not found."} />
 }

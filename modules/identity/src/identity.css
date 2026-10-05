@@ -1,13 +1,41 @@
 .identity-page {
-  padding: 24px 32px;
-  max-width: 1120px;
+  width: 100%;
 }
 
 .identity-page a {
-  color: #0972d3;
+  color: #1677ff;
+  text-decoration: none;
+}
+
+.identity-page a:hover {
+  text-decoration: underline;
+}
+
+.identity-header-note {
+  margin-top: 4px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="dark"] .identity-header-note {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.identity-id,
+.identity-secret {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
 }
 
 .identity-secret {
   word-break: break-all;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.identity-center {
+  display: flex;
+  justify-content: center;
+  padding: 48px 0;
+}
+
+.identity-more {
+  margin-top: 12px;
 }

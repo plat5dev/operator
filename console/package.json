@@ -11,8 +11,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@cloudscape-design/components": "^3.0.0",
-    "@cloudscape-design/global-styles": "^1.0.0",
+    "@ant-design/icons": "^6.3.4",
+    "antd": "^6.6.5",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.9.0"

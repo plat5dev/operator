@@ -1,32 +1,23 @@
-import { useState, type FormEvent } from "react"
-import Alert from "@cloudscape-design/components/alert"
-import Box from "@cloudscape-design/components/box"
-import Button from "@cloudscape-design/components/button"
-import Container from "@cloudscape-design/components/container"
-import Form from "@cloudscape-design/components/form"
-import FormField from "@cloudscape-design/components/form-field"
-import Header from "@cloudscape-design/components/header"
-import Input from "@cloudscape-design/components/input"
-import SpaceBetween from "@cloudscape-design/components/space-between"
+import { useState } from "react"
+import { Alert, Button, Card, Form, Input, Typography } from "antd"
 import { errorMessage } from "./api"
 import { useSession } from "./session"
 
+type PasswordValues = {
+  current: string
+  password: string
+  confirm: string
+}
+
 export function AccountPage() {
   const session = useSession()
-  const [current, setCurrent] = useState("")
-  const [next, setNext] = useState("")
-  const [confirm, setConfirm] = useState("")
+  const [form] = Form.useForm<PasswordValues>()
   const [error, setError] = useState("")
   const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState(false)
 
-  async function onSubmit(event: FormEvent) {
-    event.preventDefault()
+  async function onSubmit(values: PasswordValues) {
     setSaved(false)
-    if (next !== confirm) {
-      setError("Passwords do not match.")
-      return
-    }
     setBusy(true)
     setError("")
     try {
@@ -34,15 +25,13 @@ export function AccountPage() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ current_password: current, password: next }),
+        body: JSON.stringify({ current_password: values.current, password: values.password }),
       })
       if (!res.ok) {
         setError(await errorMessage(res))
         return
       }
-      setCurrent("")
-      setNext("")
-      setConfirm("")
+      form.resetFields()
       setSaved(true)
     } catch {
       setError("Request failed.")
@@ -52,47 +41,43 @@ export function AccountPage() {
   }
 
   return (
-    <div className="shell-page">
-      <form onSubmit={onSubmit}>
-        <Form
-          header={<Header variant="h1">Account settings</Header>}
-          actions={<Button variant="primary" formAction="submit" loading={busy}>Change password</Button>}
+    <Card title="Account settings" style={{ maxWidth: 480 }}>
+      {error ? <Alert type="error" showIcon title={error} style={{ marginBottom: 16 }} /> : null}
+      {saved ? <Alert type="success" showIcon title="Password changed." style={{ marginBottom: 16 }} /> : null}
+      <Form form={form} layout="vertical" onFinish={onSubmit}>
+        <Form.Item label="Email">
+          <Typography.Text>{session.email}</Typography.Text>
+        </Form.Item>
+        <Form.Item
+          label="Current password"
+          name="current"
+          rules={[{ required: true, message: "Enter your current password." }]}
         >
-          <Container>
-            <SpaceBetween size="l">
-              {error ? <Alert type="error">{error}</Alert> : null}
-              {saved ? <Alert type="success">Password changed.</Alert> : null}
-              <FormField label="Email">
-                <Box>{session.email}</Box>
-              </FormField>
-              <FormField label="Current password">
-                <Input
-                  type="password"
-                  value={current}
-                  autoComplete="current-password"
-                  onChange={({ detail }) => setCurrent(detail.value)}
-                />
-              </FormField>
-              <FormField label="New password">
-                <Input
-                  type="password"
-                  value={next}
-                  autoComplete="new-password"
-                  onChange={({ detail }) => setNext(detail.value)}
-                />
-              </FormField>
-              <FormField label="Confirm new password">
-                <Input
-                  type="password"
-                  value={confirm}
-                  autoComplete="new-password"
-                  onChange={({ detail }) => setConfirm(detail.value)}
-                />
-              </FormField>
-            </SpaceBetween>
-          </Container>
-        </Form>
-      </form>
-    </div>
+          <Input.Password autoComplete="current-password" />
+        </Form.Item>
+        <Form.Item label="New password" name="password" rules={[{ required: true, message: "Enter a new password." }]}>
+          <Input.Password autoComplete="new-password" />
+        </Form.Item>
+        <Form.Item
+          label="Confirm new password"
+          name="confirm"
+          dependencies={["password"]}
+          rules={[
+            { required: true, message: "Confirm the new password." },
+            ({ getFieldValue }) => ({
+              validator(_, value) {
+                if (!value || getFieldValue("password") === value) return Promise.resolve()
+                return Promise.reject(new Error("Passwords do not match."))
+              },
+            }),
+          ]}
+        >
+          <Input.Password autoComplete="new-password" />
+        </Form.Item>
+        <Button type="primary" htmlType="submit" loading={busy}>
+          Change password
+        </Button>
+      </Form>
+    </Card>
   )
 }

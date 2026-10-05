@@ -44,9 +44,17 @@ These specifiers are provided by the shell. Leave them external. Bundling anothe
 - `react/jsx-dev-runtime`
 - `react-router-dom`
 
-They are the versions the console was built with. A different major will not work. Cloudscape is not one of these. A module that wants it depends on it itself.
+They are the versions the console was built with. A different major will not work. Ant Design is not one of these. A module that wants it depends on it itself.
 
 The shell loads `entry` and nothing else. A relative import from that script is served from the same directory. The shell does not load a stylesheet. Put styles in the script.
+
+## Theme
+
+The shell sets `data-theme` on `<html>` to `dark` or `light`. A missing value, or anything else, is dark. The choice is stored in `localStorage` under `operator-theme`.
+
+Read `document.documentElement.dataset.theme`. After changing it, the shell fires `operator-theme` on `window`. The attribute is the source of truth. The event only means re-read it.
+
+The shell does not pass the theme as a prop. Ant Design in a module is that module's copy. Wrap `ConfigProvider` if those components should follow.
 
 ## Calls
 

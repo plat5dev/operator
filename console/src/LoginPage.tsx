@@ -1,21 +1,16 @@
-import { useEffect, useState, type FormEvent } from "react"
+import { useEffect, useState } from "react"
 import { Navigate, useSearchParams } from "react-router-dom"
-import Alert from "@cloudscape-design/components/alert"
-import Button from "@cloudscape-design/components/button"
-import Container from "@cloudscape-design/components/container"
-import Form from "@cloudscape-design/components/form"
-import FormField from "@cloudscape-design/components/form-field"
-import Header from "@cloudscape-design/components/header"
-import Input from "@cloudscape-design/components/input"
-import SpaceBetween from "@cloudscape-design/components/space-between"
-import Spinner from "@cloudscape-design/components/spinner"
+import { Alert, Button, Card, Form, Input, Spin, Typography } from "antd"
 import { errorMessage, getSession, safeNext } from "./api"
+
+type LoginValues = {
+  email: string
+  password: string
+}
 
 export function LoginPage() {
   const [params] = useSearchParams()
   const next = safeNext(params.get("next"))
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
   const [authed, setAuthed] = useState<boolean | undefined>(undefined)
@@ -34,8 +29,7 @@ export function LoginPage() {
     }
   }, [])
 
-  async function onSubmit(event: FormEvent) {
-    event.preventDefault()
+  async function onSubmit(values: LoginValues) {
     setBusy(true)
     setError("")
     try {
@@ -43,7 +37,7 @@ export function LoginPage() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify(values),
       })
       if (!res.ok) {
         setError(await errorMessage(res))
@@ -60,39 +54,31 @@ export function LoginPage() {
   if (authed) return <Navigate to={next} replace />
   if (authed === undefined) {
     return (
-      <div className="shell-center">
-        <Spinner size="large" />
+      <div className="session-pending">
+        <Spin size="large" />
       </div>
     )
   }
 
   return (
     <div className="login">
-      <form onSubmit={onSubmit}>
-        <Container header={<Header variant="h1">Operator</Header>}>
-          <Form actions={<Button variant="primary" formAction="submit" loading={busy}>Log in</Button>}>
-            <SpaceBetween size="l">
-              {error ? <Alert type="error">{error}</Alert> : null}
-              <FormField label="Email">
-                <Input
-                  type="email"
-                  value={email}
-                  autoComplete="username"
-                  onChange={({ detail }) => setEmail(detail.value)}
-                />
-              </FormField>
-              <FormField label="Password">
-                <Input
-                  type="password"
-                  value={password}
-                  autoComplete="current-password"
-                  onChange={({ detail }) => setPassword(detail.value)}
-                />
-              </FormField>
-            </SpaceBetween>
-          </Form>
-        </Container>
-      </form>
+      <Card className="login-card" variant="outlined">
+        <Typography.Title level={3} style={{ marginTop: 0 }}>
+          Operator
+        </Typography.Title>
+        {error ? <Alert type="error" showIcon title={error} style={{ marginBottom: 16 }} /> : null}
+        <Form layout="vertical" onFinish={onSubmit}>
+          <Form.Item label="Email" name="email" rules={[{ required: true, message: "Enter an email." }]}>
+            <Input type="email" autoComplete="username" size="large" />
+          </Form.Item>
+          <Form.Item label="Password" name="password" rules={[{ required: true, message: "Enter a password." }]}>
+            <Input.Password autoComplete="current-password" size="large" />
+          </Form.Item>
+          <Button type="primary" htmlType="submit" loading={busy} block size="large">
+            Log in
+          </Button>
+        </Form>
+      </Card>
     </div>
   )
 }

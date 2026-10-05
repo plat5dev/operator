@@ -1,10 +1,10 @@
-import { Navigate, Outlet, Route, Routes } from "react-router-dom"
+import { Navigate, Route, Routes } from "react-router-dom"
 import { AccountPage } from "./AccountPage"
 import { readModules } from "./api"
 import { LoginPage } from "./LoginPage"
 import { ModuleHost } from "./module"
 import { RequireSession } from "./session"
-import { ShellHeader, Well } from "./Shell"
+import { ShellLayout, Well } from "./Shell"
 
 const modules = readModules()
 
@@ -31,8 +31,7 @@ function mountPath(basePath: string): string {
 function AuthedShell() {
   return (
     <RequireSession>
-      <ShellHeader />
-      <Outlet />
+      <ShellLayout />
     </RequireSession>
   )
 }

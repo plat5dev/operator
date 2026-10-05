@@ -1,35 +1,25 @@
 import { useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
-import Alert from "@cloudscape-design/components/alert"
-import Button from "@cloudscape-design/components/button"
-import Form from "@cloudscape-design/components/form"
-import FormField from "@cloudscape-design/components/form-field"
-import Header from "@cloudscape-design/components/header"
-import Input from "@cloudscape-design/components/input"
-import SpaceBetween from "@cloudscape-design/components/space-between"
-import Table from "@cloudscape-design/components/table"
+import { Alert, Button, Card, Flex, Form, Input } from "antd"
+import type { TableColumnsType } from "antd"
 import { failure, filled, seg, send, useList, type Org } from "./api"
 import { useBase } from "./base"
-import { Empty, More, Page, onSubmit } from "./ui"
+import { DataTable, Id, More, Page, PageHeader } from "./ui"
 
 export function OrgList() {
   const base = useBase()
   const navigate = useNavigate()
   const orgs = useList<Org>("/organizations", "organizations")
-  const [userId, setUserId] = useState("")
-  const [name, setName] = useState("")
-  const [slug, setSlug] = useState("")
-  const [openUser, setOpenUser] = useState("")
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
 
-  async function create() {
+  async function create(values: { userId: string; name: string; slug?: string }) {
     setBusy(true)
     setError("")
-    const body: Record<string, string> = { name: name.trim() }
-    filled(body, "slug", slug)
+    const body: Record<string, string> = { name: values.name.trim() }
+    filled(body, "slug", values.slug ?? "")
     try {
-      const res = await send("POST", `/users/${seg(userId.trim())}/organizations`, body)
+      const res = await send("POST", `/users/${seg(values.userId.trim())}/organizations`, body)
       const created = (await res.json()) as Org
       navigate(`${base}/organizations/${seg(created.id)}`)
     } catch (err) {
@@ -39,60 +29,67 @@ export function OrgList() {
     }
   }
 
+  const columns: TableColumnsType<Org> = [
+    {
+      title: "Name",
+      dataIndex: "name",
+      render: (name: string, item) => <Link to={`${base}/organizations/${seg(item.id)}`}>{name}</Link>,
+    },
+    { title: "Slug", dataIndex: "slug" },
+    { title: "ID", dataIndex: "id", render: (id: string) => <Id value={id} /> },
+  ]
+
   return (
     <Page>
-      <Header variant="h1" description="Every organization. There is no user directory.">
-        Identity
-      </Header>
-      {error || orgs.error ? <Alert type="error">{error || orgs.error}</Alert> : null}
-      <form
-        onSubmit={onSubmit(async () => {
-          const id = openUser.trim()
-          if (id) navigate(`${base}/users/${seg(id)}`)
-        })}
-      >
-        <SpaceBetween size="s" direction="horizontal">
-          <FormField label="User ID">
-            <Input value={openUser} onChange={({ detail }) => setOpenUser(detail.value)} />
-          </FormField>
-          <Button formAction="submit">Open user</Button>
-        </SpaceBetween>
-      </form>
-      <Table
-        header={<Header variant="h2">Organizations</Header>}
-        items={orgs.items}
-        loading={orgs.loading}
-        trackBy="id"
-        empty={<Empty />}
-        columnDefinitions={[
-          {
-            id: "name",
-            header: "Name",
-            cell: (item) => <Link to={`${base}/organizations/${seg(item.id)}`}>{item.name}</Link>,
-          },
-          { id: "slug", header: "Slug", cell: (item) => item.slug },
-          { id: "id", header: "ID", cell: (item) => item.id },
-        ]}
-      />
-      <More hasMore={orgs.hasMore} onMore={orgs.loadMore} />
-      <form onSubmit={onSubmit(create)}>
+      <PageHeader title="Identity" description="Every organization. There is no user directory." />
+      {error || orgs.error ? <Alert type="error" showIcon title={error || orgs.error} /> : null}
+      <Card title="Open user">
         <Form
-          header={<Header variant="h2">Create organization</Header>}
-          actions={<Button variant="primary" formAction="submit" loading={busy}>Create</Button>}
+          layout="vertical"
+          onFinish={(values: { userId: string }) => {
+            navigate(`${base}/users/${seg(values.userId.trim())}`)
+          }}
         >
-          <SpaceBetween size="s">
-            <FormField label="User ID" description="Customer user id. Creating an organization also adds this user as a member.">
-              <Input value={userId} onChange={({ detail }) => setUserId(detail.value)} />
-            </FormField>
-            <FormField label="Name">
-              <Input value={name} onChange={({ detail }) => setName(detail.value)} />
-            </FormField>
-            <FormField label="Slug" description="Optional. Derived from the name when blank.">
-              <Input value={slug} onChange={({ detail }) => setSlug(detail.value)} />
-            </FormField>
-          </SpaceBetween>
+          <Flex gap={12} align="flex-end" wrap>
+            <Form.Item
+              label="User ID"
+              name="userId"
+              rules={[{ required: true, whitespace: true, message: "Enter a user id." }]}
+              style={{ marginBottom: 0, flex: "1 1 280px" }}
+            >
+              <Input />
+            </Form.Item>
+            <Form.Item style={{ marginBottom: 0 }}>
+              <Button htmlType="submit">Open user</Button>
+            </Form.Item>
+          </Flex>
         </Form>
-      </form>
+      </Card>
+      <Card title="Organizations">
+        <DataTable loading={orgs.loading} items={orgs.items} columns={columns} />
+        <More hasMore={orgs.hasMore} onMore={orgs.loadMore} />
+      </Card>
+      <Card title="Create organization">
+        <Form layout="vertical" onFinish={create} style={{ maxWidth: 480 }}>
+          <Form.Item
+            label="User ID"
+            name="userId"
+            extra="Customer user id. Creating an organization also adds this user as a member."
+            rules={[{ required: true, whitespace: true, message: "Enter a user id." }]}
+          >
+            <Input />
+          </Form.Item>
+          <Form.Item label="Name" name="name" rules={[{ required: true, whitespace: true, message: "Enter a name." }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item label="Slug" name="slug" extra="Optional. Derived from the name when blank.">
+            <Input />
+          </Form.Item>
+          <Button type="primary" htmlType="submit" loading={busy}>
+            Create
+          </Button>
+        </Form>
+      </Card>
     </Page>
   )
 }

@@ -5,42 +5,125 @@ body,
   margin: 0;
 }
 
-.shell-bar {
+html[data-theme="dark"],
+html[data-theme="dark"] body {
+  color-scheme: dark;
+  background: #000;
+}
+
+html[data-theme="light"],
+html[data-theme="light"] body {
+  color-scheme: light;
+  background: #f5f5f5;
+}
+
+.shell-frame {
+  height: 100dvh;
+  overflow: hidden;
+  background: #f5f5f5;
+}
+
+[data-theme="dark"] .shell-frame {
+  background: #000;
+}
+
+.shell-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  width: 100%;
-  min-height: 48px;
-  padding: 8px 20px;
-  box-sizing: border-box;
+  height: 56px;
+  line-height: 56px;
+  padding: 0 24px;
+  background: #fff;
+  border-bottom: 1px solid #f0f0f0;
 }
 
-.shell-bar-start {
+[data-theme="dark"] .shell-header {
+  background: #141414;
+  border-bottom-color: #303030;
+}
+
+.shell-header-start {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 8px;
   min-width: 0;
 }
 
-.shell-page {
-  padding: 24px 32px;
-  max-width: 720px;
+.shell-brand {
+  flex: none;
+  color: rgba(0, 0, 0, 0.88);
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: 0.01em;
+  text-decoration: none;
 }
 
-.shell-center,
-.login {
-  min-height: 100%;
+.shell-brand:hover {
+  color: rgba(0, 0, 0, 0.88);
+}
+
+[data-theme="dark"] .shell-brand,
+[data-theme="dark"] .shell-brand:hover {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.shell-header-end {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.shell-services {
+  min-width: 0;
+  max-width: min(280px, 40vw);
+}
+
+.shell-services-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shell-account {
+  display: inline-block;
+  max-width: min(240px, 40vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+
+.shell-content {
+  flex: 1;
+  min-height: 0;
+  padding: 24px;
+  overflow: auto;
+}
+
+.shell-center {
+  min-height: 240px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-.login {
+.login,
+.session-pending {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 24px 16px;
   box-sizing: border-box;
+  background: #f5f5f5;
 }
 
-.login form {
-  width: min(420px, 100%);
+[data-theme="dark"] .login,
+[data-theme="dark"] .session-pending {
+  background: #000;
+}
+
+.login-card {
+  width: min(400px, 100%);
 }

@@ -4,6 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Operator</title>
+    <!-- Before paint. theme.tsx uses the same rule. -->
+    <script>
+      try {
+        document.documentElement.dataset.theme = localStorage.getItem("operator-theme") === "light" ? "light" : "dark"
+      } catch (e) {
+        document.documentElement.dataset.theme = "dark"
+      }
+    </script>
     <script type="importmap">
       {
         "imports": {

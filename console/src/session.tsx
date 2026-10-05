@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
 import { Navigate, useLocation } from "react-router-dom"
-import Spinner from "@cloudscape-design/components/spinner"
+import { Spin } from "antd"
 import { getSession, safeNext, type Session } from "./api"
 
 const SessionContext = createContext<Session | null>(null)
@@ -31,8 +31,8 @@ export function RequireSession({ children }: { children: ReactNode }) {
 
   if (session === undefined) {
     return (
-      <div className="shell-center">
-        <Spinner size="large" />
+      <div className="session-pending">
+        <Spin size="large" />
       </div>
     )
   }
