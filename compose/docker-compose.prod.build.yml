@@ -7,6 +7,6 @@ services:
       dockerfile: Dockerfile
       target: prod
       args:
-        VERSION: ${OPERATOR_VERSION:-v0.2.1}
+        VERSION: ${OPERATOR_VERSION:-v0.2.2}
         REVISION: ${OPERATOR_REVISION:-}
         SOURCE: https://github.com/plat5dev/operator
