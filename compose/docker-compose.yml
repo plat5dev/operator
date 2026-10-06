@@ -1,0 +1,41 @@
+# Dev stack: gateway, Dex as the staff IdP, an echo upstream. See README.md.
+name: operator
+
+services:
+  operator:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: prod
+    ports:
+      - "${OPERATOR_PORT:-5004}:5004"
+      - "127.0.0.1:8004:8004"
+    environment:
+      ROUTES_FILE: /etc/operator/routes.yml
+      AUTH_ISSUER: http://localhost:5556/dex
+      AUTH_JWKS_URI: http://dex:5556/dex/keys
+      AUTH_AUDIENCES: operator-cli
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173}
+    volumes:
+      - ./routes.yml:/etc/operator/routes.yml:ro
+    depends_on:
+      - dex
+      - echo
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  dex:
+    image: ghcr.io/dexidp/dex:v2.44.0
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    ports:
+      - "5556:5556"
+    volumes:
+      - ./dex.yml:/etc/dex/config.yaml:ro
+
+  echo:
+    image: traefik/whoami:v1.11

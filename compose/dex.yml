@@ -1,0 +1,21 @@
+# Local staff IdP. Not for production. Contract: docs/idp.md.
+issuer: http://localhost:5556/dex
+storage:
+  type: memory
+web:
+  http: 0.0.0.0:5556
+oauth2:
+  # The password grant is for local scripts only.
+  passwordConnector: local
+  skipApprovalScreen: true
+enablePasswordDB: true
+staticPasswords:
+  - email: staff@example.com
+    # "password"
+    hash: "$2a$10$PU91IMgGuOpYIgbkSRoL7ugHIFRkH2b9F0ssd90gVkXaiEDTT2qWq"
+    username: staff
+    userID: 6c1f3c3e-5f8b-4f0e-9d55-7d3c1d2b9a10
+staticClients:
+  - id: operator-cli
+    name: Operator CLI
+    secret: operator-cli-secret

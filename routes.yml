@@ -1,0 +1,40 @@
+# Identity's public URLs. This gateway dials identity. The path names the target. Contract: docs/routes.md.
+# Routes that mint customer credentials (creating API keys, member sessions) are left out on purpose.
+upstreams:
+  identity:
+    url: http://identity:3000
+    routes:
+      - path: /organizations
+        methods: [GET]
+      - path: /organizations/{organization_id}
+        methods: [GET, PATCH, DELETE]
+      - path: /organizations/{organization_id}/members
+        methods: [GET, POST]
+      - path: /organizations/{organization_id}/invites
+        methods: [GET, POST]
+      - path: /organizations/{organization_id}/invites/{invite_id}
+        methods: [DELETE]
+      - path: /organizations/{organization_id}/service-accounts
+        methods: [GET, POST]
+      - path: /organizations/{organization_id}/service-accounts/{service_account_id}
+        methods: [GET, PATCH, DELETE]
+      - path: /organizations/{organization_id}/service-accounts/{service_account_id}/api-keys
+        methods: [GET]
+      - path: /organizations/{organization_id}/service-accounts/{service_account_id}/api-keys/{key_id}
+        methods: [DELETE]
+      - path: /members/{member_id}
+        methods: [GET, PATCH, DELETE]
+      - path: /members/{member_id}/api-keys
+        methods: [GET]
+      - path: /members/{member_id}/api-keys/{key_id}
+        methods: [DELETE]
+      - path: /users/{user_id}/memberships
+        methods: [GET]
+      - path: /users/{user_id}/organizations
+        methods: [POST]
+      - path: /users/{user_id}/invites/redeem
+        methods: [POST]
+      - path: /users/{user_id}/api-keys
+        methods: [GET]
+      - path: /users/{user_id}/api-keys/{key_id}
+        methods: [DELETE]
