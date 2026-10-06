@@ -30,11 +30,11 @@ The `401` message stays generic. `details.reason` may say `expired`, `invalid`, 
 
 ## Keys
 
-JWKS is fetched at boot. `/health/ready` is **503** until the first fetch succeeds. Keys are cached. An unknown `kid` triggers a refetch, at most once every 30 seconds. A refetch failure keeps the cached keys.
+JWKS is fetched at boot, retried with backoff until it succeeds. Until then `/health/ready` is **503** and a request carrying a token is **503** `SERVICE_UNAVAILABLE`: the token cannot be judged. Keys are cached and refreshed every 15 minutes. An unknown `kid` triggers a refetch, at most once every 30 seconds. A failed fetch keeps the cached keys.
 
 ## Local development
 
-Compose runs Dex as the staff IdP with a static user and a static client. Scripts get a token from Dex with the password grant against its local connector. That grant is for local development only.
+Compose runs Dex as the staff IdP with a static user and a static client (`compose/dex.yml`). Scripts get a token from Dex with the password grant against its local connector. That grant is for local development only. See [`compose/README.md`](../compose/README.md).
 
 ## Switching IdPs
 

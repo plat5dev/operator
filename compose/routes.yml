@@ -1,0 +1,11 @@
+# Dev routes. echo returns the request it received, so you can see what the upstream sees.
+upstreams:
+  echo:
+    url: http://echo:80
+    routes:
+      - path: /organizations
+        methods: [GET]
+      - path: /organizations/{organization_id}
+        methods: [GET, PATCH, DELETE]
+      - path: /organizations/{organization_id}/members
+        methods: [GET, POST]

@@ -90,7 +90,7 @@ Plat5 envelope: `error.type`, `error.code`, `error.message`, `error.request_id`.
 | Unacceptable path | **400** `INVALID_REQUEST` |
 | No configured route | **404** `NOT_FOUND` |
 | Denied by authz | **403** `FORBIDDEN` |
-| Upstream or authz service unreachable | **503** `SERVICE_UNAVAILABLE` |
+| Staff IdP keys never fetched, upstream unreachable, or authz service unreachable | **503** `SERVICE_UNAVAILABLE` |
 
 ## Browser clients
 
