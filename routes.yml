@@ -10,6 +10,10 @@ upstreams:
         methods: [GET, PATCH, DELETE]
       - path: /organizations/{organization_id}/members
         methods: [GET, POST]
+      - path: /organizations/{organization_id}/members/{member_id}
+        methods: [GET, PATCH, DELETE]
+      - path: /organizations/{organization_id}/roles
+        methods: [GET]
       - path: /organizations/{organization_id}/invites
         methods: [GET, POST]
       - path: /organizations/{organization_id}/invites/{invite_id}
