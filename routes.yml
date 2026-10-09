@@ -1,5 +1,6 @@
 # Paths this gateway forwards. The path names the target. Contract: docs/routes.md.
-# Identity's public URLs, and the org audit log read. Credential-minting routes are left out on purpose.
+# Identity's public URLs, the org audit log read, and the staff audit log read. Credential-minting routes are left out on purpose.
+# With AUDIT_ENABLED=false, drop the operator-audit upstream: a route to a service that is not running is 503.
 # Addresses are the Plat5 compose network. A deployment mounts its own file.
 upstreams:
   identity:
@@ -47,4 +48,9 @@ upstreams:
     url: http://audit:3002
     routes:
       - path: /organizations/{organization_id}/audit-events
+        methods: [GET]
+  operator-audit:
+    url: http://operator-audit:5005
+    routes:
+      - path: /operator-audit-events
         methods: [GET]

@@ -10,12 +10,14 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/plat5dev/operator/internal/auth"
+	"github.com/plat5dev/operator/internal/metrics"
 	"github.com/plat5dev/operator/internal/routes"
 )
 
@@ -29,7 +31,7 @@ func (f fakeAuth) Verify(_ context.Context, header string) (*auth.Operator, erro
 	case "":
 		return nil, auth.ErrMissing
 	case "Bearer good":
-		return &auth.Operator{ID: "op_1", Email: "a@x.test"}, nil
+		return &auth.Operator{ID: "op_1", Email: "a@x.test", Issuer: "https://idp.test", ClientID: "operator-console"}, nil
 	case "Bearer old":
 		return nil, auth.ErrExpired
 	}
@@ -78,6 +80,11 @@ func (u *upstream) seen() *seen {
 
 func setup(t *testing.T, upstreamURL string, a Authenticator, timeout time.Duration) (http.Handler, *bytes.Buffer) {
 	t.Helper()
+	return setupWith(t, upstreamURL, a, timeout, nil, nil)
+}
+
+func setupWith(t *testing.T, upstreamURL string, a Authenticator, timeout time.Duration, aw AuditWriter, reg *metrics.Registry) (http.Handler, *bytes.Buffer) {
+	t.Helper()
 	tab, err := routes.Parse([]byte(`
 upstreams:
   identity:
@@ -85,6 +92,8 @@ upstreams:
     routes:
       - path: /organizations
         methods: [GET]
+      - path: /organizations/{organization_id}
+        methods: [GET, PATCH]
       - path: /organizations/{organization_id}/members
         methods: [GET, POST]
 `))
@@ -100,6 +109,8 @@ upstreams:
 		Auth:            a,
 		AllowedOrigins:  []string{"https://console.test"},
 		UpstreamTimeout: timeout,
+		Audit:           aw,
+		Metrics:         reg,
 		Log:             slog.New(slog.NewJSONHandler(&logs, nil)),
 	})
 	return g, &logs
@@ -209,7 +220,8 @@ func TestForward(t *testing.T) {
 	if w.Code != http.StatusTeapot || w.Body.String() != `{"ok":true}` {
 		t.Fatalf("status %d body %q", w.Code, w.Body)
 	}
-	if got := w.Header().Values("X-Request-ID"); len(got) != 1 || got[0] != "client-id.1" {
+	id := w.Header().Get("X-Request-ID")
+	if got := w.Header().Values("X-Request-ID"); len(got) != 1 || !generatedID.MatchString(id) {
 		t.Fatalf("response X-Request-ID = %v", got)
 	}
 	if w.Header().Get("Access-Control-Allow-Origin") != "" {
@@ -234,7 +246,7 @@ func TestForward(t *testing.T) {
 			t.Fatalf("%s reached the upstream", h)
 		}
 	}
-	if s.Header.Get("X-Request-ID") != "client-id.1" {
+	if s.Header.Get("X-Request-ID") != id {
 		t.Fatalf("upstream X-Request-ID = %q", s.Header.Get("X-Request-ID"))
 	}
 	if s.Header.Get("traceparent") == "" {
@@ -248,7 +260,7 @@ func TestForward(t *testing.T) {
 
 	line := lastLog(t, logs)
 	want := map[string]any{
-		"msg": "request", "request_id": "client-id.1", "method": "POST", "status": float64(418),
+		"msg": "request", "request_id": id, "method": "POST", "status": float64(418),
 		"operator_id": "op_1", "operator_email": "a@x.test", "route": "/organizations/{organization_id}/members",
 	}
 	for k, v := range want {
@@ -261,13 +273,19 @@ func TestForward(t *testing.T) {
 	}
 }
 
-func TestRequestIDReplacedWhenInvalid(t *testing.T) {
+var generatedID = regexp.MustCompile(`^[0-9a-f]{32}$`)
+
+func TestRequestIDAlwaysGenerated(t *testing.T) {
 	up := newUpstream(t, nil)
 	h, _ := setup(t, up.srv.URL, fakeAuth{}, 0)
-	w := do(h, "GET", "/organizations", map[string]string{"Authorization": "Bearer good", "X-Request-ID": "bad id\n"})
-	id := w.Header().Get("X-Request-ID")
-	if id == "" || id == "bad id\n" || up.seen().Header.Get("X-Request-ID") != id {
-		t.Fatalf("id = %q, upstream %q", id, up.seen().Header.Get("X-Request-ID"))
+	seen := map[string]bool{}
+	for _, client := range []string{"", "client-id.1", "bad id\n"} {
+		w := do(h, "GET", "/organizations", map[string]string{"Authorization": "Bearer good", "X-Request-ID": client})
+		id := w.Header().Get("X-Request-ID")
+		if !generatedID.MatchString(id) || seen[id] || up.seen().Header.Get("X-Request-ID") != id {
+			t.Fatalf("client %q: id = %q, upstream %q", client, id, up.seen().Header.Get("X-Request-ID"))
+		}
+		seen[id] = true
 	}
 }
 

@@ -1,4 +1,5 @@
-# Dev stack: gateway, Dex as the staff IdP, an echo upstream. See README.md.
+# Dev stack: gateway, Dex as the staff IdP, an echo upstream, and the staff audit log
+# (Postgres and operator-audit). See README.md.
 name: operator
 
 services:
@@ -16,11 +17,17 @@ services:
       AUTH_JWKS_URI: http://dex:5556/dex/keys
       AUTH_AUDIENCES: operator-cli
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173}
+      AUDIT_URL: http://operator-audit:8005
+      AUDIT_TOKEN: dev-audit-token
     volumes:
       - ./routes.yml:/etc/operator/routes.yml:ro
     depends_on:
-      - dex
-      - echo
+      dex:
+        condition: service_started
+      echo:
+        condition: service_started
+      operator-audit:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8004/health/ready"]
       interval: 10s
@@ -28,6 +35,60 @@ services:
       retries: 5
       start_period: 10s
     restart: unless-stopped
+
+  operator-audit:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: operator-audit
+    command: ["serve"]
+    ports:
+      - "127.0.0.1:8005:8005"
+    environment:
+      # The writer role: it can add events and their outcomes, never change or delete one.
+      DATABASE_URL: postgres://audit_writer:audit_writer@operator-postgres:5432/operator?sslmode=disable
+      INTERNAL_TOKEN: dev-audit-token
+    depends_on:
+      operator-audit-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  operator-audit-migrate:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: operator-audit
+    command: ["migrate"]
+    environment:
+      # The owner role: migrations and the writer's grants. Not used at runtime.
+      DATABASE_URL: postgres://audit_owner:audit_owner@operator-postgres:5432/operator?sslmode=disable
+      WRITER_ROLE: audit_writer
+    depends_on:
+      operator-postgres:
+        condition: service_healthy
+    restart: "no"
+
+  operator-postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: operator
+      AUDIT_OWNER_PASSWORD: audit_owner
+      AUDIT_WRITER_PASSWORD: audit_writer
+    volumes:
+      - ./postgres-init.sh:/docker-entrypoint-initdb.d/10-audit-roles.sh:ro
+      - operator-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "operator"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   dex:
     image: ghcr.io/dexidp/dex:v2.44.0
@@ -39,3 +100,6 @@ services:
 
   echo:
     image: traefik/whoami:v1.11
+
+volumes:
+  operator-postgres:

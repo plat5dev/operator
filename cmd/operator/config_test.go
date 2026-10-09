@@ -15,6 +15,8 @@ func base() map[string]string {
 		"AUTH_ISSUER":    "http://localhost:5556/dex",
 		"AUTH_JWKS_URI":  "http://dex:5556/dex/keys",
 		"AUTH_AUDIENCES": "operator-cli, operator-console",
+		"AUDIT_URL":      "http://operator-audit:8005/",
+		"AUDIT_TOKEN":    "secret",
 	}
 }
 
@@ -29,6 +31,27 @@ func TestConfigDefaults(t *testing.T) {
 	}
 	if strings.Join(c.Audiences, "|") != "operator-cli|operator-console" {
 		t.Fatalf("audiences = %v", c.Audiences)
+	}
+	if c.AuditURL != "http://operator-audit:8005" || c.AuditToken != "secret" {
+		t.Fatalf("audit = %q %q", c.AuditURL, c.AuditToken)
+	}
+}
+
+func TestConfigAuditOff(t *testing.T) {
+	m := base()
+	m["AUDIT_ENABLED"] = "false"
+	m["AUDIT_URL"] = ""
+	m["AUDIT_TOKEN"] = ""
+	c, err := loadConfig(env(m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.AuditURL != "" {
+		t.Fatalf("audit off kept the URL %q", c.AuditURL)
+	}
+	m["AUDIT_URL"] = "http://operator-audit:8005"
+	if c, _ := loadConfig(env(m)); c.AuditURL != "" {
+		t.Fatal("audit off must ignore AUDIT_URL")
 	}
 }
 
@@ -46,15 +69,19 @@ func TestConfigOrigins(t *testing.T) {
 
 func TestConfigErrors(t *testing.T) {
 	cases := map[string]map[string]string{
-		"no issuer":       {"AUTH_ISSUER": ""},
-		"no jwks":         {"AUTH_JWKS_URI": ""},
-		"bad jwks":        {"AUTH_JWKS_URI": "dex/keys"},
-		"no audience":     {"AUTH_AUDIENCES": " , "},
-		"wildcard origin": {"ALLOWED_ORIGINS": "*"},
-		"origin path":     {"ALLOWED_ORIGINS": "https://a.test/app"},
-		"bad port":        {"INTERNAL_PORT": "http"},
-		"bad timeout":     {"UPSTREAM_TIMEOUT_MS": "0"},
-		"authz set":       {"AUTHZ_URL": "http://pdp:8080"},
+		"no issuer":        {"AUTH_ISSUER": ""},
+		"no jwks":          {"AUTH_JWKS_URI": ""},
+		"bad jwks":         {"AUTH_JWKS_URI": "dex/keys"},
+		"no audience":      {"AUTH_AUDIENCES": " , "},
+		"wildcard origin":  {"ALLOWED_ORIGINS": "*"},
+		"origin path":      {"ALLOWED_ORIGINS": "https://a.test/app"},
+		"bad port":         {"INTERNAL_PORT": "http"},
+		"bad timeout":      {"UPSTREAM_TIMEOUT_MS": "0"},
+		"authz set":        {"AUTHZ_URL": "http://pdp:8080"},
+		"no audit url":     {"AUDIT_URL": ""},
+		"bad audit url":    {"AUDIT_URL": "operator-audit:8005"},
+		"no audit token":   {"AUDIT_TOKEN": ""},
+		"audit enabled no": {"AUDIT_ENABLED": "no"},
 	}
 	for name, over := range cases {
 		t.Run(name, func(t *testing.T) {

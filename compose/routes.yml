@@ -1,4 +1,5 @@
 # Dev routes. echo returns the request it received, so you can see what the upstream sees.
+# operator-audit serves the staff audit log.
 upstreams:
   echo:
     url: http://echo:80
@@ -9,3 +10,8 @@ upstreams:
         methods: [GET, PATCH, DELETE]
       - path: /organizations/{organization_id}/members
         methods: [GET, POST]
+  operator-audit:
+    url: http://operator-audit:5005
+    routes:
+      - path: /operator-audit-events
+        methods: [GET]

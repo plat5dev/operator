@@ -1,5 +1,7 @@
-# Production stack: pulls ghcr.io/plat5dev/operator:${OPERATOR_VERSION}. Copy .env.template to .env.
+# Production stack: pulls ghcr.io/plat5dev/operator and ghcr.io/plat5dev/operator-audit at
+# ${OPERATOR_VERSION}. Copy .env.template to .env.
 # Build locally instead: add -f docker-compose.prod.build.yml and --build.
+# Audit off: set AUDIT_ENABLED=false and start only the gateway (up -d operator).
 name: operator
 
 services:
@@ -15,6 +17,9 @@ services:
       AUTH_OPERATOR_ID_CLAIM: ${AUTH_OPERATOR_ID_CLAIM:-sub}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
       UPSTREAM_TIMEOUT_MS: ${UPSTREAM_TIMEOUT_MS:-30000}
+      AUDIT_ENABLED: ${AUDIT_ENABLED:-true}
+      AUDIT_URL: ${AUDIT_URL:-http://operator-audit:8005}
+      AUDIT_TOKEN: ${AUDIT_TOKEN:-}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8004/health/ready"]
       interval: 30s
@@ -22,3 +27,53 @@ services:
       retries: 3
       start_period: 15s
     restart: unless-stopped
+    # Not on operator-audit: the gateway boots without it and answers 503 until it is up.
+
+  operator-audit:
+    image: ghcr.io/plat5dev/operator-audit:${OPERATOR_VERSION:?set OPERATOR_VERSION}
+    command: ["serve"]
+    environment:
+      DATABASE_URL: postgres://audit_writer:${AUDIT_WRITER_PASSWORD:-}@operator-postgres:5432/operator?sslmode=disable
+      INTERNAL_TOKEN: ${AUDIT_TOKEN:-}
+    depends_on:
+      operator-audit-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  operator-audit-migrate:
+    image: ghcr.io/plat5dev/operator-audit:${OPERATOR_VERSION:?set OPERATOR_VERSION}
+    command: ["migrate"]
+    environment:
+      DATABASE_URL: postgres://audit_owner:${AUDIT_OWNER_PASSWORD:-}@operator-postgres:5432/operator?sslmode=disable
+      WRITER_ROLE: audit_writer
+    depends_on:
+      operator-postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # The operator plane's Postgres. Never Plat5's.
+  operator-postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD: ${OPERATOR_POSTGRES_PASSWORD:-}
+      POSTGRES_DB: operator
+      AUDIT_OWNER_PASSWORD: ${AUDIT_OWNER_PASSWORD:-}
+      AUDIT_WRITER_PASSWORD: ${AUDIT_WRITER_PASSWORD:-}
+    volumes:
+      - ./postgres-init.sh:/docker-entrypoint-initdb.d/10-audit-roles.sh:ro
+      - operator-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "operator"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  operator-postgres:

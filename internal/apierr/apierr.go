@@ -66,3 +66,20 @@ func Internal(w http.ResponseWriter, r *http.Request) {
 func Unavailable(w http.ResponseWriter, r *http.Request) {
 	write(w, r, http.StatusServiceUnavailable, "api_error", "SERVICE_UNAVAILABLE", "Service temporarily unavailable.", nil)
 }
+
+// Field is one invalid input, in details.fields.
+type Field struct {
+	Path    string `json:"path"`
+	Message string `json:"message"`
+}
+
+const validationMessage = "That doesn't look right."
+
+// Validation is 422 VALIDATION_ERROR naming the fields at fault.
+func Validation(w http.ResponseWriter, r *http.Request, paths ...string) {
+	fields := make([]Field, len(paths))
+	for i, p := range paths {
+		fields[i] = Field{Path: p, Message: validationMessage}
+	}
+	write(w, r, http.StatusUnprocessableEntity, "invalid_request_error", "VALIDATION_ERROR", validationMessage, map[string]any{"fields": fields})
+}
