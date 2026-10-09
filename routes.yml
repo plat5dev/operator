@@ -1,5 +1,6 @@
-# Identity's public URLs. This gateway dials identity. The path names the target. Contract: docs/routes.md.
-# Routes that mint customer credentials (creating API keys, member sessions) are left out on purpose.
+# Paths this gateway forwards. The path names the target. Contract: docs/routes.md.
+# Identity's public URLs, and the org audit log read. Credential-minting routes are left out on purpose.
+# Addresses are the Plat5 compose network. A deployment mounts its own file.
 upstreams:
   identity:
     url: http://identity:3000
@@ -42,3 +43,8 @@ upstreams:
         methods: [GET]
       - path: /users/{user_id}/api-keys/{key_id}
         methods: [DELETE]
+  audit:
+    url: http://audit:3002
+    routes:
+      - path: /organizations/{organization_id}/audit-events
+        methods: [GET]

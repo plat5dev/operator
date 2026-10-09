@@ -13,7 +13,7 @@ cd compose
 docker compose up --build
 ```
 
-API on `:5004`, health on `:8004`. The route list is `routes.yml` (identity's paths; mount a deployment copy in prod). Image: `ghcr.io/plat5dev/operator` on `v*` tags.
+API on `:5004`, health on `:8004`. The route list is `routes.yml` (identity's paths, and the org audit log read; mount a deployment copy in prod). Image: `ghcr.io/plat5dev/operator` on `v*` tags.
 
 ## Layout
 

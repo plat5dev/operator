@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -99,6 +100,31 @@ func TestParseDisjointMethodsAllowed(t *testing.T) {
 	in := one("      - path: /a/new\n        methods: [POST]\n      - path: /a/{id}\n        methods: [GET]\n")
 	if _, err := Parse([]byte(in)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestShippedCatalog(t *testing.T) {
+	b, err := os.ReadFile("../../routes.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tab, err := Parse(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	segs, err := Segments("/organizations/org_1/audit-events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, params := tab.Match("GET", segs)
+	if r == nil || r.Upstream() != "audit" || r.Target().String() != "http://audit:3002" {
+		t.Fatalf("audit route: %+v", r)
+	}
+	if params["organization_id"] != "org_1" {
+		t.Fatalf("params: %v", params)
+	}
+	if w, _ := tab.Match("POST", segs); w != nil {
+		t.Fatal("audit log read must be GET only")
 	}
 }
 
