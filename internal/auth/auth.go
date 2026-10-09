@@ -51,7 +51,10 @@ type Config struct {
 type Operator struct {
 	ID     string
 	Email  string
-	Claims map[string]any
+	Issuer string
+	// ClientID is the client the token was issued to: azp, else client_id. Empty when neither.
+	ClientID string
+	Claims   map[string]any
 }
 
 type Verifier struct {
@@ -240,7 +243,11 @@ func (v *Verifier) Verify(ctx context.Context, header string) (*Operator, error)
 		return nil, ErrInvalid
 	}
 	email, _ := all["email"].(string)
-	return &Operator{ID: id, Email: email, Claims: all}, nil
+	client, _ := all["azp"].(string)
+	if client == "" {
+		client, _ = all["client_id"].(string)
+	}
+	return &Operator{ID: id, Email: email, Issuer: reg.Issuer, ClientID: client, Claims: all}, nil
 }
 
 func claim(claims map[string]any, path string) any {

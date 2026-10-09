@@ -14,7 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Resource names the authz resource for a route. Validated now, used in slice 2.
+// Resource names the authz resource for a route. Validated now, used in slice 3.
 type Resource struct {
 	Type string `yaml:"type"`
 	ID   string `yaml:"id"`

@@ -110,7 +110,7 @@ Audit is not part of this gateway's `/health/ready`. With audit on, every authen
 | `upstream` | The upstream's name in the route file. `null` when no route matched |
 | `method` | HTTP method |
 | `route` | The matched path template, not the raw path. `null` when no route matched |
-| `params` | Path params by name, as matched. `{}` when there are none, or no route matched |
+| `params` | Path params by name, as matched. `{}` when there are none, or no route matched. Bytes Postgres cannot store (invalid UTF-8, NUL) are recorded as U+FFFD |
 | `path` | The raw path, escaped as received, cut to 2048 characters. Set only when no route matched; otherwise `null` |
 | `ip` | The TCP peer address of the connection. Behind a proxy, that is the proxy's address. `X-Forwarded-For` is not read |
 | `user_agent` | `User-Agent`, cut to 512 characters. `null` when absent |

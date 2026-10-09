@@ -1,12 +1,26 @@
 # Optional override: build from this repo instead of pulling GHCR.
 # docker compose -f docker-compose.prod.yml -f docker-compose.prod.build.yml --env-file .env up --build -d
+x-build-args: &build-args
+  VERSION: ${OPERATOR_VERSION:-dev}
+  REVISION: ${OPERATOR_REVISION:-}
+  SOURCE: https://github.com/plat5dev/operator
+
 services:
   operator:
     build:
       context: ..
       dockerfile: Dockerfile
       target: prod
-      args:
-        VERSION: ${OPERATOR_VERSION:-dev}
-        REVISION: ${OPERATOR_REVISION:-}
-        SOURCE: https://github.com/plat5dev/operator
+      args: *build-args
+  operator-audit:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: operator-audit
+      args: *build-args
+  operator-audit-migrate:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: operator-audit
+      args: *build-args

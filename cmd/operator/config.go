@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// config is slice 1's environment. Contract: docs/v1.md, docs/idp.md.
+// config is the gateway's environment. Contract: docs/v1.md, docs/v2.md, docs/idp.md, docs/audit.md.
 type config struct {
 	Addr            string
 	InternalPort    string
@@ -21,6 +21,9 @@ type config struct {
 	AllowedOrigins  []string
 	UpstreamTimeout time.Duration
 	AuthzURL        string
+	// AuditURL is operator-audit's internal base URL. Empty when audit is off.
+	AuditURL   string
+	AuditToken string
 }
 
 func loadConfig(getenv func(string) string) (config, error) {
@@ -67,7 +70,24 @@ func loadConfig(getenv func(string) string) (config, error) {
 		c.AllowedOrigins = append(c.AllowedOrigins, origin)
 	}
 	if c.AuthzURL != "" {
-		errs = append(errs, errors.New("AUTHZ_URL is slice 2 and not supported yet; unset it"))
+		errs = append(errs, errors.New("AUTHZ_URL is slice 3 and not supported yet; unset it"))
+	}
+	// Audit is on unless AUDIT_ENABLED=false. On, a forgotten URL fails boot instead of
+	// silently turning audit off.
+	switch get("AUDIT_ENABLED", "true") {
+	case "true":
+		c.AuditURL = strings.TrimRight(get("AUDIT_URL", ""), "/")
+		if u, err := url.Parse(c.AuditURL); c.AuditURL == "" || err != nil || (u.Scheme != "http" && u.Scheme != "https") ||
+			u.Host == "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+			errs = append(errs, errors.New("AUDIT_URL must be an http or https URL unless AUDIT_ENABLED=false"))
+		}
+		c.AuditToken = get("AUDIT_TOKEN", "")
+		if c.AuditToken == "" {
+			errs = append(errs, errors.New("AUDIT_TOKEN is required unless AUDIT_ENABLED=false"))
+		}
+	case "false":
+	default:
+		errs = append(errs, errors.New("AUDIT_ENABLED must be true or false"))
 	}
 	return c, errors.Join(errs...)
 }

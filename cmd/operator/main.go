@@ -13,8 +13,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/plat5dev/operator/internal/audit"
 	"github.com/plat5dev/operator/internal/auth"
 	"github.com/plat5dev/operator/internal/gateway"
+	"github.com/plat5dev/operator/internal/metrics"
 	"github.com/plat5dev/operator/internal/routes"
 )
 
@@ -47,25 +49,39 @@ func run(log *slog.Logger) error {
 	}, log)
 	go verifier.Run(ctx)
 
+	reg := metrics.NewRegistry()
+	gw := gateway.Config{
+		Routes:          table,
+		Auth:            verifier,
+		AllowedOrigins:  cfg.AllowedOrigins,
+		UpstreamTimeout: cfg.UpstreamTimeout,
+		Metrics:         reg,
+		Log:             log,
+	}
+	var auditWriter *audit.Writer
+	if cfg.AuditURL != "" {
+		auditWriter = audit.New(audit.Config{URL: cfg.AuditURL, Token: cfg.AuditToken, Log: log, Metrics: reg})
+		gw.Audit = auditWriter
+	}
+
 	api := &http.Server{
-		Addr: cfg.Addr,
-		Handler: gateway.New(gateway.Config{
-			Routes:          table,
-			Auth:            verifier,
-			AllowedOrigins:  cfg.AllowedOrigins,
-			UpstreamTimeout: cfg.UpstreamTimeout,
-			Log:             log,
-		}),
+		Addr:              cfg.Addr,
+		Handler:           gateway.New(gw),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
 	internal := &http.Server{
 		Addr:              net.JoinHostPort("", cfg.InternalPort),
-		Handler:           health(verifier),
+		Handler:           internalRoutes(verifier, reg),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	log.Info("starting", "addr", cfg.Addr, "internal_port", cfg.InternalPort, "routes", table.Len(), "issuer", cfg.Issuer)
+	if auditWriter != nil {
+		log.Info("audit: on", "url", cfg.AuditURL)
+	} else {
+		log.Warn("audit: off")
+	}
 	log.Warn("authz: none")
 
 	errc := make(chan error, 2)
@@ -84,13 +100,23 @@ func run(log *slog.Logger) error {
 	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = api.Shutdown(shutdown)
+	// No more requests, so no more outcomes. Send what is queued (docs/audit.md#delivery).
+	if auditWriter != nil {
+		drain, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := auditWriter.Close(drain); err != nil {
+			log.Error("audit outcomes lost at shutdown", "err", err)
+		}
+	}
 	_ = internal.Shutdown(shutdown)
 	return err
 }
 
-// health serves /health/live and /health/ready. Ready means routes loaded and JWKS fetched once.
-func health(v *auth.Verifier) http.Handler {
+// internalRoutes serves /health/live, /health/ready, and /metrics. Ready means routes loaded
+// and JWKS fetched once. It does not probe operator-audit.
+func internalRoutes(v *auth.Verifier, reg *metrics.Registry) http.Handler {
 	mux := http.NewServeMux()
+	mux.Handle("GET /metrics", reg)
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, _ *http.Request) {
 		status(w, http.StatusOK, "healthy")
 	})

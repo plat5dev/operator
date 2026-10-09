@@ -190,8 +190,31 @@ func TestVerify(t *testing.T) {
 	}
 
 	op, _ := v.Verify(context.Background(), cases[0].header)
-	if op.Email != "a@x.test" {
-		t.Fatalf("email = %q", op.Email)
+	if op.Email != "a@x.test" || op.Issuer != issuer || op.ClientID != "" {
+		t.Fatalf("email = %q, issuer = %q, client = %q", op.Email, op.Issuer, op.ClientID)
+	}
+}
+
+func TestClientID(t *testing.T) {
+	key := rsaKey(t, "k1")
+	v := newVerifier(t, newIDP(t, key))
+	now := time.Now()
+	cases := []struct {
+		extra map[string]any
+		want  string
+	}{
+		{map[string]any{"azp": "operator-console", "client_id": "other"}, "operator-console"},
+		{map[string]any{"client_id": "automation"}, "automation"},
+		{map[string]any{"azp": 7}, ""},
+	}
+	for _, c := range cases {
+		op, err := v.Verify(context.Background(), "Bearer "+sign(t, key, jose.RS256, std(now), c.extra))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if op.ClientID != c.want {
+			t.Fatalf("%v: client = %q", c.extra, op.ClientID)
+		}
 	}
 }
 
