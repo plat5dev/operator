@@ -1,6 +1,6 @@
 # Authorization
 
-**Slice 2.** Not built in slice 1. This is the contract it will build to.
+**Slice 3.** Not built yet. This is the contract it will build to.
 
 This gateway is the enforcement point. It does not decide. It asks a decision service over [OpenID AuthZEN](https://openid.net/wg/authzen/) (Authorization API 1.0) and enforces the answer. Any AuthZEN decision service works. RBAC, ABAC, or relationships are that service's choice, not this gateway's.
 
@@ -9,7 +9,7 @@ This gateway is the enforcement point. It does not decide. It asks a decision se
 | `AUTHZ_URL` | Behaviour |
 |-------------|-----------|
 | unset | Every authenticated operator may call every route. Boot logs `authz: none` at warn level |
-| set | Every request that reaches step 5 of the request order ([`model.md`](model.md)) is evaluated |
+| set | Every request that reaches step 6 of the request order ([`model.md`](model.md#request-order)) is evaluated |
 
 There is no built-in policy and no fallback policy. Off means off.
 
@@ -55,6 +55,8 @@ Defaults mean a route needs no authz config to be evaluated. Overrides give poli
 
 The response `context` (reasons) is logged with the decision. It is not returned to the client.
 
+With audit on, a denial or a decision-service failure is an audit event with outcome `rejected` ([`audit.md`](audit.md)). This slice defines the event's `decision` field.
+
 Decisions are not cached. Revoking access takes effect on the next request.
 
 `/health/ready` does not probe the decision service. A decision service outage is 503 per request, not a restart loop.
@@ -75,4 +77,4 @@ Only the path, method, and token claims. Ids in the query string or the body are
 
 ## Default decision service
 
-Slice 2 ships an example deployment of an AuthZEN decision service with a groups-to-roles policy. Which one is chosen then. It is an example to copy, not a dependency.
+Slice 3 ships an example deployment of an AuthZEN decision service with a groups-to-roles policy. Which one is chosen then. It is an example to copy, not a dependency.

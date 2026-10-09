@@ -38,4 +38,4 @@ Compose runs Dex as the staff IdP with a static user and a static client (`compo
 
 ## Switching IdPs
 
-Operator ids are whatever the claim holds. Switching IdPs changes them, which changes the attribution log and any authz data keyed by operator id. That is a deployment migration, not something this gateway maps.
+Operator ids are whatever the claim holds, and switching IdPs changes them. Audit events keep the ids they were recorded with, beside the issuer that vouched for them. Authz data keyed by operator id has to be migrated. That is a deployment migration, not something this gateway maps.
