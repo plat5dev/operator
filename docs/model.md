@@ -39,14 +39,16 @@ Before forwarding, this gateway strips `Authorization`, `Cookie`, and `X-API-Key
 
 ## Request order
 
-1. `OPTIONS` preflight from an allowed origin → answered here. Never forwarded.
-2. Missing or invalid token → **401** `UNAUTHORIZED`.
-3. Path not acceptable (see below) → **400** `INVALID_REQUEST`.
-4. No configured route for this method and path → **404** `NOT_FOUND`.
-5. Authorization, when configured → see [`authz.md`](authz.md).
-6. Forward.
+1. `OPTIONS` preflight from an allowed origin → answered here. Never forwarded. Not audited.
+2. Missing or invalid token → **401** `UNAUTHORIZED`. Not audited.
+3. Check the path and match a route. Nothing is answered yet.
+4. When audit is on, write the audit intent → **503** `SERVICE_UNAVAILABLE` if it cannot be written. See [`audit.md`](audit.md).
+5. Path not acceptable (see below) → **400** `INVALID_REQUEST`. No configured route for this method and path → **404** `NOT_FOUND`.
+6. Authorization, when configured → see [`authz.md`](authz.md).
+7. Forward.
+8. When audit is on, write the audit outcome, in the background.
 
-Authentication comes before route matching. An unauthenticated caller learns nothing about the route list.
+Authentication comes before route matching. An unauthenticated caller learns nothing about the route list. With audit on, every request past step 2 is an audit event, including a 400 or a 404.
 
 ## Forwarding
 
@@ -56,25 +58,17 @@ Because the matched path is the path the service sees, this gateway refuses path
 
 Upstream status and body pass through untranslated. Upstream dial failure or timeout → **503** `SERVICE_UNAVAILABLE`. That is this gateway's rejection, not a downstream status.
 
+`X-Plat5-Audit-Details` is stripped on every route: from the request before upstream, and from the response before the client. This gateway reads it from the response first ([`audit.md`](audit.md#details)).
+
 ## Request id and tracing
 
-This gateway accepts a client `X-Request-ID` if it is 1–128 characters of `[A-Za-z0-9._-]`. Otherwise it generates one. It forwards it upstream and returns it on every response. `traceparent` passes through.
+This gateway generates a request id for every request. A client's `X-Request-ID` is not accepted; the generated id replaces it. The id is forwarded upstream, returned on every response, and is the audit event's key. `traceparent` passes through.
 
-## Attribution
+## Audit
 
-This gateway's log is the record of who did what. One line per request:
+With audit on (the default), every authenticated request is an event in the staff audit log, written before the service is called. The event is the record of who did what. See [`audit.md`](audit.md). Services already log `X-Request-ID`, and the two join on it.
 
-| Field | |
-|-------|--|
-| `operator_id` | The operator id claim |
-| `operator_email` | The `email` claim, when present |
-| `request_id` | As forwarded |
-| `method`, `route` | The route template that matched, not the raw path |
-| `params` | Path parameters by name, e.g. `organization_id` |
-| `status`, `duration_ms` | |
-| `decision` | When authz is configured |
-
-Services already log `X-Request-ID`. The two logs join on it.
+This gateway also writes one log line per request, for operations. The line carries `request_id`, `method`, `route`, `params`, `status`, `duration_ms`, and, once authenticated, `operator_id` and `operator_email`. With audit on, the line is not the audit record. With audit off, it is the only record.
 
 ## Lists
 
@@ -90,7 +84,7 @@ Plat5 envelope: `error.type`, `error.code`, `error.message`, `error.request_id`.
 | Unacceptable path | **400** `INVALID_REQUEST` |
 | No configured route | **404** `NOT_FOUND` |
 | Denied by authz | **403** `FORBIDDEN` |
-| Staff IdP keys never fetched, upstream unreachable, or authz service unreachable | **503** `SERVICE_UNAVAILABLE` |
+| Staff IdP keys never fetched, audit intent not written, upstream unreachable, or authz service unreachable | **503** `SERVICE_UNAVAILABLE` |
 
 ## Browser clients
 
