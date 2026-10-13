@@ -30,10 +30,16 @@ upstreams:
         methods: [DELETE]
       - path: /members/{member_id}
         methods: [GET, PATCH, DELETE]
+      - path: /members/{member_id}/user
+        methods: [GET]
       - path: /members/{member_id}/api-keys
         methods: [GET]
       - path: /members/{member_id}/api-keys/{key_id}
         methods: [DELETE]
+      - path: /users
+        methods: [GET]
+      - path: /users/{user_id}
+        methods: [GET, PATCH, DELETE]
       - path: /users/{user_id}/memberships
         methods: [GET]
       - path: /users/{user_id}/organizations
@@ -48,6 +54,8 @@ upstreams:
     url: http://audit:3002
     routes:
       - path: /organizations/{organization_id}/audit-events
+        methods: [GET]
+      - path: /users/{user_id}/audit-events
         methods: [GET]
   operator-audit:
     url: http://operator-audit:5005
