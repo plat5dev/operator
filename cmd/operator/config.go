@@ -18,6 +18,7 @@ type config struct {
 	JWKSURI         string
 	Audiences       []string
 	IDClaim         string
+	EmailClaim      string
 	AllowedOrigins  []string
 	UpstreamTimeout time.Duration
 	AuthzURL        string
@@ -41,6 +42,7 @@ func loadConfig(getenv func(string) string) (config, error) {
 		JWKSURI:      get("AUTH_JWKS_URI", ""),
 		Audiences:    list(getenv("AUTH_AUDIENCES")),
 		IDClaim:      get("AUTH_OPERATOR_ID_CLAIM", "sub"),
+		EmailClaim:   get("AUTH_OPERATOR_EMAIL_CLAIM", "email"),
 		AuthzURL:     get("AUTHZ_URL", ""),
 	}
 	var errs []error

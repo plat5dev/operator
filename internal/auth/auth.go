@@ -45,7 +45,10 @@ type Config struct {
 	Audiences []string
 	// IDClaim is a dotted path into the claims. Default "sub".
 	IDClaim string
-	Client  *http.Client
+	// EmailClaim is a dotted path to the operator's email. Default "email". Optional
+	// in the token: absent, the operator has no email.
+	EmailClaim string
+	Client     *http.Client
 }
 
 type Operator struct {
@@ -74,6 +77,9 @@ type Verifier struct {
 func New(cfg Config, log *slog.Logger) *Verifier {
 	if cfg.IDClaim == "" {
 		cfg.IDClaim = "sub"
+	}
+	if cfg.EmailClaim == "" {
+		cfg.EmailClaim = "email"
 	}
 	if cfg.Client == nil {
 		cfg.Client = &http.Client{Timeout: 10 * time.Second}
@@ -242,7 +248,7 @@ func (v *Verifier) Verify(ctx context.Context, header string) (*Operator, error)
 	if id == "" {
 		return nil, ErrInvalid
 	}
-	email, _ := all["email"].(string)
+	email, _ := claim(all, v.cfg.EmailClaim).(string)
 	client, _ := all["azp"].(string)
 	if client == "" {
 		client, _ = all["client_id"].(string)

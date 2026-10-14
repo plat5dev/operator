@@ -246,6 +246,38 @@ func TestNestedClaim(t *testing.T) {
 	}
 }
 
+func TestEmailClaim(t *testing.T) {
+	key := rsaKey(t, "k1")
+	p := newIDP(t, key)
+	now := time.Now()
+
+	def := newVerifier(t, p)
+	op, err := def.Verify(context.Background(), "Bearer "+sign(t, key, jose.RS256, std(now), map[string]any{"email": "a@example.com"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op.Email != "a@example.com" {
+		t.Fatalf("default email = %q", op.Email)
+	}
+
+	nested := newVerifier(t, p, func(c *Config) { c.EmailClaim = "properties.email" })
+	tok := sign(t, key, jose.RS256, std(now), map[string]any{"properties": map[string]any{"email": "b@example.com"}})
+	op, err = nested.Verify(context.Background(), "Bearer "+tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op.Email != "b@example.com" {
+		t.Fatalf("nested email = %q", op.Email)
+	}
+	op, err = nested.Verify(context.Background(), "Bearer "+sign(t, key, jose.RS256, std(now)))
+	if err != nil {
+		t.Fatalf("email is optional: %v", err)
+	}
+	if op.Email != "" {
+		t.Fatalf("absent email = %q", op.Email)
+	}
+}
+
 func TestNotReady(t *testing.T) {
 	p := newIDP(t, rsaKey(t, "k1"))
 	p.status = http.StatusInternalServerError
