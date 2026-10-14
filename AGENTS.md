@@ -23,7 +23,7 @@ Read the doc, don’t re-derive:
 | The only credential is a bearer JWT from the staff IdP, with a required audience | [`docs/idp.md`](docs/idp.md) |
 | This gateway stores no accounts, passwords, or sessions | model |
 | Path forwarded exactly as matched. Ambiguous paths are 400 | model |
-| Own route list. No customer gateway, no route-registry | [`docs/routes.md`](docs/routes.md) |
+| Own route list. No customer gateway, no control plane | [`docs/routes.md`](docs/routes.md) |
 | Audit is on or off for the whole deployment, and on by default. On, every authenticated request is an event, written before forward. Not written → 503 | [`docs/audit.md`](docs/audit.md) |
 | This gateway generates every request id. A client's is not accepted | model |
 | The staff log is in the operator plane's own Postgres, never Plat5's. Customers do not see it | audit |
@@ -70,12 +70,12 @@ Do not add these because they would be convenient:
 | API keys | A staff caller cannot get a token from the IdP |
 | Authz on query or body ids | A policy cannot be written without them |
 | Decision caching | Decision service latency is measured as a problem |
-| Shared route source with the customer route-registry | Hand-copied upstream URLs cause a real mismatch |
+| Shared route source with the customer control plane | Hand-copied upstream URLs cause a real mismatch |
 | Customer login provisioning | Operators must create customer logins |
 
 ## Siblings
 
-Plat5 is the customer runtime (gateway, identity, route-registry). Auth is the customer IdP. This repo does not import either. It dials service addresses. It reads `X-Plat5-Audit-Details` as Plat5 defines it, the same way it forwards paths as Plat5's services define them.
+Plat5 is the customer runtime (gateway, control plane, identity, audit). Auth is the customer IdP. This repo does not import either. It dials service addresses. It reads `X-Plat5-Audit-Details` as Plat5 defines it, the same way it forwards paths as Plat5's services define them.
 
 A console is a separate repo and a client of this API.
 
