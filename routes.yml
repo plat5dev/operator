@@ -40,6 +40,8 @@ upstreams:
         methods: [GET]
       - path: /users/{user_id}
         methods: [GET, PATCH, DELETE]
+      - path: /users/{user_id}/status
+        methods: [PATCH]
       - path: /users/{user_id}/memberships
         methods: [GET]
       - path: /users/{user_id}/organizations
