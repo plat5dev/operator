@@ -30,7 +30,7 @@ Gateway API on `:5004`, health and metrics on `:8004`. operator-audit on `:5005`
 | `internal/db/` | operator-audit's Postgres: migrations, owner and writer roles |
 | `internal/metrics/` | Prometheus text format for `/metrics` |
 | `internal/apierr/` | Plat5 error envelope |
-| `compose/` | Dev (with Dex and Postgres) and prod compose |
+| `compose/` | Dev (with Plat5 Auth as the staff IdP, and Postgres) and prod compose |
 
 ## Tests
 

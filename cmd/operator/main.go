@@ -42,10 +42,11 @@ func run(log *slog.Logger) error {
 	defer stop()
 
 	verifier := auth.New(auth.Config{
-		Issuer:    cfg.Issuer,
-		JWKSURI:   cfg.JWKSURI,
-		Audiences: cfg.Audiences,
-		IDClaim:   cfg.IDClaim,
+		Issuer:     cfg.Issuer,
+		JWKSURI:    cfg.JWKSURI,
+		Audiences:  cfg.Audiences,
+		IDClaim:    cfg.IDClaim,
+		EmailClaim: cfg.EmailClaim,
 	}, log)
 	go verifier.Run(ctx)
 

@@ -8,3 +8,8 @@ CREATE ROLE audit_owner LOGIN PASSWORD :'owner_password';
 CREATE ROLE audit_writer LOGIN PASSWORD :'writer_password';
 CREATE SCHEMA audit AUTHORIZATION audit_owner;
 SQL
+# Dev compose only: the staff IdP's database. Prod has no IdP in this file.
+if [ -n "${STAFF_AUTH_DB:-}" ]; then
+  psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+    -c "CREATE DATABASE \"$STAFF_AUTH_DB\""
+fi

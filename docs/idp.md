@@ -12,6 +12,7 @@ How a caller gets a token is the IdP's business. People typically use authorizat
 | `AUTH_JWKS_URI` | yes | Where this gateway fetches keys. Separate from the issuer so a container can reach JWKS on an internal address while `iss` stays public |
 | `AUTH_AUDIENCES` | yes | Comma-separated. The token's `aud` must contain one. Empty refuses boot |
 | `AUTH_OPERATOR_ID_CLAIM` | no | Dotted JSON path to the operator id. Default `sub` |
+| `AUTH_OPERATOR_EMAIL_CLAIM` | no | Dotted JSON path to the operator's email, recorded in the staff audit log. Default `email`. Absent in a token, the operator has no email |
 
 Audience is required, unlike the customer gateway. A staff IdP issues tokens for many internal applications. Without an audience check, a token for any of them would be an operator token.
 
@@ -34,7 +35,7 @@ JWKS is fetched at boot, retried with backoff until it succeeds. Until then `/he
 
 ## Local development
 
-Compose runs Dex as the staff IdP with a static user and a static client (`compose/dex.yml`). Scripts get a token from Dex with the password grant against its local connector. That grant is for local development only. See [`compose/README.md`](../compose/README.md).
+Compose runs [Plat5 Auth](https://github.com/plat5dev/auth) as the staff IdP: its own issuer and database, never the customer one. Dev mode seeds `staff@example.com` / `password` for the browser, and scripts mint a token with `POST /dev/token`. Both are local development only. Plat5 Auth puts its ids under `properties`, so compose sets `AUTH_OPERATOR_ID_CLAIM=properties.user_id` and `AUTH_OPERATOR_EMAIL_CLAIM=properties.email` (the issuer sets `AUTH_TOKEN_EMAIL=true`). See [`compose/README.md`](../compose/README.md).
 
 ## Switching IdPs
 
