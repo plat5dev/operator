@@ -98,7 +98,7 @@ services:
   # The staff IdP: Plat5 Auth in dev mode, its own issuer and database. Never the
   # customer issuer (docs/idp.md).
   staff-auth:
-    image: ghcr.io/plat5dev/auth:${AUTH_VERSION:-v0.2.0}
+    image: ghcr.io/plat5dev/auth:${AUTH_VERSION:-v0.2.1}
     ports:
       - "5411:5000"
     environment:
