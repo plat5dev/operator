@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// config is the gateway's environment. Contract: docs/v1.md, docs/v2.md, docs/idp.md, docs/audit.md.
+// config is the gateway's environment. Contract: docs/model.md, docs/routes.md, docs/idp.md, docs/audit.md.
 type config struct {
 	Addr            string
 	InternalPort    string
