@@ -9,7 +9,7 @@ This gateway is the enforcement point. It does not decide. It asks a decision se
 | `AUTHZ_URL` | Behaviour |
 |-------------|-----------|
 | unset | Every authenticated operator may call every route. Boot logs `authz: none` at warn level |
-| set | Every request that reaches step 7 of the request order ([`model.md`](model.md#request-order)) is evaluated |
+| set | Every request that reaches authorization in the request order ([`model.md`](model.md#request-order)) is evaluated |
 
 There is no built-in policy and no fallback policy. Off means off.
 

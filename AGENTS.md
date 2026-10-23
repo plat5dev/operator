@@ -15,8 +15,7 @@ A headless gateway for staff: a second front door onto the private APIs a Plat5 
 | The model and its rules | [`docs/model.md`](docs/model.md#rules) |
 | What this plane won't do (stop conditions) | [`docs/model.md#not-in-the-operator-plane`](docs/model.md#not-in-the-operator-plane), and each doc's "Not here" |
 | Every wire contract | [`docs/README.md`](docs/README.md) |
-| Deferred work and when it's ready | [`TODO.md`](TODO.md) |
-| Plat5 v2 transition and build order | [`docs/v2-cutover.md`](docs/v2-cutover.md) (until done) |
+| What's next, and deferred work and when it's ready | [`TODO.md`](TODO.md) |
 
 ## Siblings
 

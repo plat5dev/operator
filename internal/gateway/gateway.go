@@ -236,7 +236,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 7. Forward. Step 6, authz, is slice 3.
+	// 7. Forward. Authz, before it, is slice 3.
 	if state != nil {
 		state.Forwarded = true
 	}

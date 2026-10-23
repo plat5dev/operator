@@ -70,7 +70,7 @@ Before forwarding, this gateway strips `Authorization`, `Cookie`, `X-API-Key`, a
 8. Forward, with the headers above.
 9. When audit is on, write the audit outcome, in the background.
 
-Authentication comes before route matching. An unauthenticated caller learns nothing about the route list. With audit on, every request past step 2 is an audit event, including a 400 or a 404.
+Authentication comes before route matching. An unauthenticated caller learns nothing about the route list. With audit on, every request past authentication is an audit event, including a 400 or a 404.
 
 ## Forwarding
 

@@ -1,3 +1,15 @@
+# To do
+
+## Next
+
+The docs describe the plane against Plat5's tree of kinds; the code follows in this order.
+
+- **Routes** ([`docs/routes.md`](docs/routes.md)). `as_member` and `node`, the reserved `/as/` prefix and `{member}` param, boot checks. Rewrite `routes.yml` and `compose/routes.yml` for Plat5's identity and audit paths (`/nodes/{node_id}/…`, `/members/{member_id}/…`).
+- **Gateway** ([`docs/model.md`](docs/model.md)). Strip every incoming `X-Plat5-*`; send `X-Plat5-Principal: operator` and `X-Plat5-Operator-Id`; match `/as/{member}`, check the member against identity (`IDENTITY_URL`), strip the prefix, send `X-Plat5-Member-Id`.
+- **Audit** ([`docs/audit.md`](docs/audit.md)). `acting_as` on the intent, stored and filterable; the 400 member-check event.
+- **End to end.** Against a local Plat5 stack: browse the tree, restore a deleted project, publish a plan version as a member and see the member as its author.
+- **In `plat5 start`.** The CLI's local stack runs an operator module once the above lands.
+
 # Deferred
 
 | Work | Ready when |
