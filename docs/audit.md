@@ -4,7 +4,7 @@
 
 The staff audit log records which operator called which route, on which ids, from where, and how the request ended. This gateway records every authenticated request. The **operator-audit** service, in this repo, stores the events and serves them back through this gateway.
 
-Plat5 has an org audit log, which is a customer's record of its own members. This log is separate and in a different store. A staff request is never written into an org's log, and customers do not read this one.
+Plat5 has an audit log per tree, which is a customer's record of its own members. This log is separate and in a different store. A staff request is never written into a tree's log, even when acting as a member, and customers do not read this one.
 
 ## The model
 
@@ -13,13 +13,14 @@ An audit event is one request, not one change. A service may add what changed ([
 | Piece | Says | Owner |
 |-------|------|-------|
 | Actor | The staff principal from the token | This gateway (authentication) |
+| Acting as | The member the operator acted as, and its tree | This gateway (`/as/{member}`, checked against identity) |
 | Action | Upstream, method, route template, path params | This gateway (route match) |
 | Origin | IP, user agent | This gateway |
 | Outcome | How the request ended | This gateway |
 | Details | What changed | The service, on `X-Plat5-Audit-Details` |
 | Store and read API | | `operator-audit` |
 
-This gateway is the only writer. Services are not told the actor, and audit does not change that ([`model.md`](model.md#actor-and-target)). Details flow from the service to this gateway, never the other way.
+This gateway is the only writer. Services are told the operator id and, when acting as one, the member ([`model.md`](model.md#actor-and-target)); the record of who did what is still this log. Details flow from the service to this gateway, never the other way.
 
 Audit is on or off for the whole deployment. There is no mix.
 
@@ -45,6 +46,7 @@ With audit on, every request that authenticates is recorded, whatever its method
 | **503**, staff IdP keys never fetched | None. The token cannot be judged, so there is no actor |
 | **503**, intent not written | None, or `rejected` if the intent landed unseen ([delivery](#delivery)) |
 | **400** unacceptable path | `rejected`. `route` is `null`, `path` is set |
+| **400** member not active in the node's tree | `rejected`. `route` is set, `acting_as` is `null` |
 | **404** no route | `rejected`. `route` is `null`, `path` is set |
 | **403** / **503** from authz | `rejected`. Slice 3 |
 | Forwarded | `responded` or `no_response` |
@@ -80,12 +82,14 @@ Audit is not part of this gateway's `/health/ready`. With audit on, every authen
     "email": "a@example.com",
     "client_id": "operator-console"
   },
-  "upstream": "identity",
-  "method": "PATCH",
-  "route": "/organizations/{organization_id}/members/{member_id}",
+  "acting_as": { "member_id": "m_01J9ZX6N…", "root_id": "n_01J9ZX4K…" },
+  "upstream": "e10s",
+  "method": "POST",
+  "route": "/as/{member}/projects/{project_id}/plans/{key}/versions",
   "params": {
-    "organization_id": "01J9ZX4K7M2P5Q8R1S3T6V9W0Y",
-    "member_id": "01J9ZX6N2P5Q8R1S4T7V0W3X6Y"
+    "member": "m_01J9ZX6N…",
+    "project_id": "n_01J9ZX5A…",
+    "key": "pro"
   },
   "path": null,
   "ip": "10.0.4.17",
@@ -94,7 +98,7 @@ Audit is not part of this gateway's `/health/ready`. With audit on, every authen
   "status": 200,
   "response_bytes": 312,
   "decision": null,
-  "details": { "role": { "from": "developer", "to": "admin" } }
+  "details": { "version": 7 }
 }
 ```
 
@@ -107,6 +111,7 @@ Audit is not part of this gateway's `/health/ready`. With audit on, every authen
 | `actor.operator_id` | The operator id claim ([`idp.md`](idp.md)). Unique within an issuer |
 | `actor.email` | The `email` claim. `null` when absent |
 | `actor.client_id` | The `azp` claim, else `client_id`: the client the token was issued to, such as a console, a CLI, or automation. `null` when neither claim is present |
+| `acting_as` | `{ member_id, root_id }` on an `/as/{member}` request that passed the member check. `null` otherwise |
 | `upstream` | The upstream's name in the route file. `null` when no route matched |
 | `method` | HTTP method |
 | `route` | The matched path template, not the raw path. `null` when no route matched |
@@ -168,8 +173,9 @@ upstreams:
 | `starting_after` | The last `id` of the previous page. Must be a ULID |
 | `operator_id` | The acting operator |
 | `upstream`, `method`, `outcome`, `request_id` | Exact match |
-| `route` | Exact template, e.g. `/organizations/{organization_id}/members/{member_id}` |
-| `params[<name>]` | A path param's value, e.g. `params[organization_id]=01J…`. One per name; several names AND |
+| `route` | Exact template, e.g. `/nodes/{node_id}/bindings` |
+| `acting_as_member_id` | The member acted as |
+| `params[<name>]` | A path param's value, e.g. `params[node_id]=n_01J…`. One per name; several names AND |
 | `occurred_after`, `occurred_before` | RFC 3339. After is inclusive, before is exclusive |
 
 Filters AND. An unknown query param or a malformed value → **422** `VALIDATION_ERROR`.
@@ -183,7 +189,7 @@ Filters AND. An unknown query param or a malformed value → **422** `VALIDATION
 
 Events are ordered by `id`, newest first. `starting_after` continues the walk to older events.
 
-Until slice 3, any operator can read the whole log. That is part of [the hole](v2.md#the-hole).
+Until slice 3, any operator can read the whole log. That is part of [the hole](slice-2.md#the-hole).
 
 ## Internal API
 
@@ -199,6 +205,7 @@ Content-Type: application/json
 {
   "occurred_at": "…",
   "actor": { "issuer": "…", "operator_id": "…", "email": "…", "client_id": "…" },
+  "acting_as": null,
   "upstream": "…", "method": "…", "route": "…", "params": { … }, "path": null,
   "ip": "…", "user_agent": "…"
 }
@@ -305,9 +312,8 @@ When audit is on and `AUDIT_URL` is missing, boot fails. A forgotten URL never t
 - Audit on for some routes or operators and off for others
 - A client-chosen request id as an event's key
 - Staff events in a Plat5 org log, or Plat5's audit service or database as this log's store
-- This log shown to customers (deferred, [`../AGENTS.md`](../AGENTS.md#deferred))
-- An actor header, or any other way a service learns who called
+- This log shown to customers (deferred, [`../TODO.md`](../TODO.md))
 - This gateway reading inside details, or details creating, moving, or re-outcoming an event
 - Changing an event after its outcome, or deleting events through an API
 - Turning `pending` into anything else after the fact
-- Trusted proxies, a reason for access, retention and purge, and export (deferred, [`../AGENTS.md`](../AGENTS.md#deferred))
+- Trusted proxies, a reason for access, retention and purge, and export (deferred, [`../TODO.md`](../TODO.md))

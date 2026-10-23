@@ -9,7 +9,7 @@ This gateway is the enforcement point. It does not decide. It asks a decision se
 | `AUTHZ_URL` | Behaviour |
 |-------------|-----------|
 | unset | Every authenticated operator may call every route. Boot logs `authz: none` at warn level |
-| set | Every request that reaches step 6 of the request order ([`model.md`](model.md#request-order)) is evaluated |
+| set | Every request that reaches step 7 of the request order ([`model.md`](model.md#request-order)) is evaluated |
 
 There is no built-in policy and no fallback policy. Off means off.
 
@@ -29,19 +29,20 @@ The staff token itself is never sent to the decision service.
 ```json
 {
   "subject":  { "type": "operator", "id": "00u1abc", "properties": { "email": "a@x.com", "groups": ["support"] } },
-  "action":   { "name": "GET /organizations/{organization_id}/members" },
-  "resource": { "type": "organization", "id": "org_123",
-                "properties": { "organization_id": "org_123" } },
-  "context":  { "request_id": "…" }
+  "action":   { "name": "POST /projects/{project_id}/plans/{key}/versions" },
+  "resource": { "type": "project", "id": "n_01J…",
+                "properties": { "project_id": "n_01J…", "key": "pro", "root_id": "n_01J…" } },
+  "context":  { "request_id": "…", "member_id": "m_01J…" }
 }
 ```
 
 | Field | Default | Route override |
 |-------|---------|----------------|
-| `action.name` | Method, a space, and the route template | `action: org.members.list` |
-| `resource.type` | `route` | `resource: { type: organization, id: organization_id }` |
+| `action.name` | Method, a space, and the route template. Acting as a member, the template is prefixed `/as/{member}` | `action: plans.versions.publish` |
+| `resource.type` | `route` | `resource: { type: project, id: project_id }` |
 | `resource.id` | The route template | The named path parameter's value |
-| `resource.properties` | Every path parameter by name | — |
+| `resource.properties` | Every path parameter by name, plus `root_id` on a route acting as a member | — |
+| `context.member_id` | The member acted as, on `/as/{member}`. Absent otherwise | — |
 
 Defaults mean a route needs no authz config to be evaluated. Overrides give policies stable names that survive a path change.
 
@@ -65,8 +66,8 @@ Decisions are not cached. Revoking access takes effect on the next request.
 
 Same as AWS: a list is its own action, all or nothing.
 
-- A route whose path names a customer (`/organizations/{organization_id}/members`) is decided per customer.
-- A route that names none (`GET /organizations`) returns everything. Grant it only to operators who may see every customer.
+- A route whose path names a node (`/nodes/{node_id}/bindings`) is decided per node. A policy that scopes operators to some orgs needs the node's root, which the route's `resource` names or the policy looks up.
+- A route that names none (`GET /nodes`) returns everything. Grant it only to operators who may see every customer.
 - Operators scoped to some customers reach them by id, e.g. from a support ticket.
 
 No service filters by operator. This gateway does not filter bodies.
