@@ -9,7 +9,7 @@ staff token     →  operator gateway  →  service
 customer cred   →  customer gateway  →  same service, same API
 ```
 
-Services aren't on the public internet, and they do no auth: any front door on the private network can call them (Plat5 `docs/model.md`, principle 6). This gateway is one. It dials service addresses directly. It doesn't proxy through the customer gateway and doesn't read the customer route map.
+Services aren't on the public internet, and they do no auth: any front door on the private network can call them (Plat5 `docs/concepts/model.md`, principle 6). This gateway is one. It dials service addresses directly. It doesn't proxy through the customer gateway and doesn't read the customer route map.
 
 This gateway is an API. It serves no UI. A console is a client of it, like a script or a CLI, and lives somewhere else.
 
@@ -27,7 +27,7 @@ The operator id is not a customer member, not a principal, and not a customer Id
 
 ## Acting as a member
 
-A service that records authors needs `X-Plat5-Member-Id` (Plat5 `docs/gateway-contract.md`, rules for services). An operator supplies one by acting as a member, and only that way: the path says so.
+A service that records authors needs `X-Plat5-Member-Id` (Plat5 `docs/guides/write-a-service.md`). An operator supplies one by acting as a member, and only that way: the path says so.
 
 ```
 POST /as/{member}/projects/n_01J…/plans/pro/versions

@@ -2,7 +2,7 @@
 
 > Transitional. Delete once the operator plane runs against Plat5 v2.
 
-Plat5 v2 replaces fixed realms with a tree of kinds from config, members with bindings on any node, and services that see node ids and the caller's member id (Plat5 `docs/model.md`). Services still do no auth, so this plane keeps calling them directly. What changes here:
+Plat5 v2 replaces fixed realms with a tree of kinds from config, members with bindings on any node, and services that see node ids and the caller's member id (Plat5 `docs/concepts/model.md`). Services still do no auth, so this plane keeps calling them directly. What changes here:
 
 | Area | Before | After |
 |------|--------|-------|

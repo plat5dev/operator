@@ -136,7 +136,7 @@ An event never contains request or response bodies, the query string, headers ot
 
 ## Details
 
-`X-Plat5-Audit-Details` on the upstream response. This is Plat5's service contract (Plat5 `docs/audit.md`). This gateway reads the header as Plat5 defines it and does not import Plat5 code.
+`X-Plat5-Audit-Details` on the upstream response. This is Plat5's service contract (Plat5 `docs/concepts/audit.md`). This gateway reads the header as Plat5 defines it and does not import Plat5 code.
 
 | | |
 |--|--|
