@@ -2,7 +2,7 @@
 
 Get a staff request through. JWT in, path out, attribution logged. No authz.
 
-Slice 2 replaces the attribution log with the audit log and changes request ids ([`v2.md`](v2.md)).
+Slice 2 replaces the attribution log with the audit log and changes request ids ([`slice-2.md`](slice-2.md)).
 
 ## Pieces
 
@@ -37,4 +37,4 @@ Any authenticated operator may name any target and call any route. That is accep
 - A console
 - A shared route source with the customer control plane
 
-Ready conditions are in [`AGENTS.md`](../AGENTS.md).
+Ready conditions are in [`TODO.md`](../TODO.md).

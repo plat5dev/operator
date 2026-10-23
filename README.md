@@ -2,18 +2,18 @@
 
 Headless staff gateway for a Plat5 deployment. Staff authenticate with your IdP and call the same private service APIs the customer gateway fronts.
 
-The customer gateway fills the subject into the path. This gateway checks a staff JWT, records the request in the staff audit log, then forwards the path the operator named. That path is the target. Who did it is the audit log, which `operator-audit` (also in this repo) keeps in the operator plane's Postgres.
+The customer gateway resolves slugs to node ids and sends services the caller's member id. This gateway checks a staff JWT, records the request in the staff audit log, then forwards the path the operator named, by node id, with `X-Plat5-Operator-Id`. That path is the target. An operator can act as a member (`/as/{member}/…`) on routes that allow it, so authored records name a real member. The record of who did what is the audit log, which `operator-audit` (also in this repo) keeps in the operator plane's Postgres.
 
 Not part of the plat5 repo. Does not call the customer gateway. Serves no UI; a console is a separate client.
 
-Contract: [`docs/`](docs/). Invariants: [`AGENTS.md`](AGENTS.md). Run it: [`compose/`](compose/).
+Contract: [`docs/`](docs/). How to work here: [`AGENTS.md`](AGENTS.md). Deferred: [`TODO.md`](TODO.md). Run it: [`compose/`](compose/).
 
 ```bash
 cd compose
 docker compose up --build
 ```
 
-Gateway API on `:5004`, health and metrics on `:8004`. operator-audit on `:5005` (reached through the gateway) and `:8005` (health, metrics, the gateway's writes). The route list is `routes.yml` (identity's paths, the org audit log read, and the staff audit log read; mount a deployment copy in prod). Images: `ghcr.io/plat5dev/operator` and `ghcr.io/plat5dev/operator-audit` on `v*` tags.
+Gateway API on `:5004`, health and metrics on `:8004`. operator-audit on `:5005` (reached through the gateway) and `:8005` (health, metrics, the gateway's writes). The route list is `routes.yml` (identity's paths by node id, Plat5's audit reads, and the staff audit log read; mount a deployment copy in prod). Images: `ghcr.io/plat5dev/operator` and `ghcr.io/plat5dev/operator-audit` on `v*` tags.
 
 ## Layout
 

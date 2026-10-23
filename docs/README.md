@@ -1,15 +1,16 @@
 # Operator contracts
 
-**Start here:** [`model.md`](model.md): two front doors, actor and target, request order, audit.
+`docs/` is law. **Start here:** [`model.md`](model.md): two front doors, actor and target, acting as a member, request order, the rules, and what this plane won't do.
 
 | Doc | Contents |
 |-----|----------|
-| [`model.md`](model.md) | The model. What the gateway does to a request |
+| [`model.md`](model.md) | The model, the rules, and what's not in the operator plane |
 | [`idp.md`](idp.md) | Staff JWT contract |
-| [`routes.md`](routes.md) | Route file and matching |
+| [`routes.md`](routes.md) | Route file, matching, `as_member` |
 | [`audit.md`](audit.md) | Staff audit log and the operator-audit service (slice 2) |
 | [`authz.md`](authz.md) | AuthZEN enforcement (slice 3) |
-| [`v1.md`](v1.md) | Slice 1 scope and the hole it accepts |
-| [`v2.md`](v2.md) | Slice 2 scope: the audit log |
+| [`slice-1.md`](slice-1.md) | Slice 1 scope and the hole it accepts |
+| [`slice-2.md`](slice-2.md) | Slice 2 scope: the audit log |
+| [`v2-cutover.md`](v2-cutover.md) | Transitional: what Plat5 v2 changes here, and the build order. Deleted once done |
 
-Locked invariants and stop conditions: [`../AGENTS.md`](../AGENTS.md).
+Deferred work and when it's ready: [`../TODO.md`](../TODO.md). How to work in this repo: [`../AGENTS.md`](../AGENTS.md).

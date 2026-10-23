@@ -13,7 +13,7 @@ Record every staff request before it reaches a service. The contract is [`audit.
 
 ## Config
 
-The gateway adds these variables. The rest of its config is unchanged from [`v1.md`](v1.md#config).
+The gateway adds these variables. The rest of its config is unchanged from [`slice-1.md`](slice-1.md#config).
 
 | Variable | Default | |
 |----------|---------|--|
@@ -47,4 +47,4 @@ The hole is still open: any authenticated operator may name any target and call 
 - Configurable actor claims
 - Audit retention, purge, and export to WORM storage or a SIEM
 
-Ready conditions are in [`AGENTS.md`](../AGENTS.md#deferred).
+Ready conditions are in [`TODO.md`](../TODO.md).
