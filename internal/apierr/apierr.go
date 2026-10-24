@@ -59,12 +59,24 @@ func NotFound(w http.ResponseWriter, r *http.Request) {
 	write(w, r, http.StatusNotFound, "invalid_request_error", "NOT_FOUND", "Resource not found.", nil)
 }
 
+// NotFoundResource is a 404 naming what wasn't found, such as a route's node.
+func NotFoundResource(w http.ResponseWriter, r *http.Request, resource, id string) {
+	write(w, r, http.StatusNotFound, "invalid_request_error", "NOT_FOUND", "Resource not found.",
+		map[string]string{"resource": resource, "id": id})
+}
+
 func Internal(w http.ResponseWriter, r *http.Request) {
 	write(w, r, http.StatusInternalServerError, "api_error", "INTERNAL_ERROR", "An unexpected error occurred.", nil)
 }
 
 func Unavailable(w http.ResponseWriter, r *http.Request) {
 	write(w, r, http.StatusServiceUnavailable, "api_error", "SERVICE_UNAVAILABLE", "Service temporarily unavailable.", nil)
+}
+
+// BadGateway is an upstream that couldn't be reached, timed out, or failed mid-response:
+// 502 with the SERVICE_UNAVAILABLE code, as Plat5's gateway answers it.
+func BadGateway(w http.ResponseWriter, r *http.Request) {
+	write(w, r, http.StatusBadGateway, "api_error", "SERVICE_UNAVAILABLE", "Service temporarily unavailable.", nil)
 }
 
 // Field is one invalid input, in details.fields.

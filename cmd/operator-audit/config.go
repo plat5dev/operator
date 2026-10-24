@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// config is operator-audit's environment. Contract: docs/audit.md#runtime.
+// config is operator-audit's environment. Contract: docs/reference/env.md#operator-audit.
 type config struct {
 	Addr          string
 	InternalPort  string

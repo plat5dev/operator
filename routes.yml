@@ -1,63 +1,89 @@
-# Paths this gateway forwards. The path names the target. Contract: docs/routes.md.
-# Identity's public URLs, the org audit log read, and the staff audit log read. Credential-minting routes are left out on purpose.
-# With AUDIT_ENABLED=false, drop the operator-audit upstream: a route to a service that is not running is 503.
-# Addresses are the Plat5 compose network. A deployment mounts its own file.
-upstreams:
+# What this gateway forwards: each service's own paths, by node id. Contract:
+# docs/reference/routes.md. Addresses are Plat5's compose network; a deployment mounts
+# its own file with its addresses and its services' routes.
+#
+# Plat5 identity's service API for other front doors, except creating keys, which mints
+# customer credentials. Plat5's audit reads. The staff audit log read (drop it, and the
+# operator-audit service, with AUDIT_ENABLED=false).
+services:
   identity:
     url: http://identity:3000
     routes:
-      - path: /organizations
+      # The tree, unfiltered: ?kind=, ?parent_id=, ?status=.
+      - path: /nodes
         methods: [GET]
-      - path: /organizations/{organization_id}
+      - path: /nodes/{node_id}
+        node: node_id
         methods: [GET, PATCH, DELETE]
-      - path: /organizations/{organization_id}/members
+      - path: /nodes/{node_id}/restore
+        node: node_id
+        methods: [POST]
+      - path: /nodes/{node_id}/release-slug
+        node: node_id
+        methods: [POST]
+      # Filtered by the member, so listed only as one. Created as one, they get creator_role.
+      - path: /nodes/{node_id}/children/{kind}
+        node: node_id
+        as_member: true
         methods: [GET, POST]
-      - path: /organizations/{organization_id}/members/{member_id}
-        methods: [GET, PATCH, DELETE]
-      - path: /organizations/{organization_id}/roles
+      - path: /roots/{kind}
+        methods: [POST]
+      - path: /nodes/{node_id}/roles
+        node: node_id
         methods: [GET]
-      - path: /organizations/{organization_id}/invites
+      - path: /nodes/{node_id}/bindings
+        node: node_id
         methods: [GET, POST]
-      - path: /organizations/{organization_id}/invites/{invite_id}
+      - path: /nodes/{node_id}/bindings/{binding_id}
+        node: node_id
+        methods: [PATCH, DELETE]
+      - path: /nodes/{node_id}/access
+        node: node_id
+        methods: [GET]
+      - path: /nodes/{root_id}/members
+        node: root_id
+        methods: [GET, POST]
+      - path: /nodes/{root_id}/members/{member_id}
+        node: root_id
+        methods: [GET, DELETE]
+      - path: /nodes/{node_id}/service-accounts
+        node: node_id
+        methods: [GET, POST]
+      - path: /nodes/{node_id}/service-accounts/{member_id}
+        node: node_id
+        methods: [GET, PATCH, DELETE]
+      - path: /nodes/{node_id}/service-accounts/{member_id}/keys
+        node: node_id
+        methods: [GET]
+      - path: /nodes/{node_id}/service-accounts/{member_id}/keys/{key_id}
+        node: node_id
         methods: [DELETE]
-      - path: /organizations/{organization_id}/service-accounts
+      - path: /nodes/{node_id}/invites
+        node: node_id
         methods: [GET, POST]
-      - path: /organizations/{organization_id}/service-accounts/{service_account_id}
-        methods: [GET, PATCH, DELETE]
-      - path: /organizations/{organization_id}/service-accounts/{service_account_id}/api-keys
-        methods: [GET]
-      - path: /organizations/{organization_id}/service-accounts/{service_account_id}/api-keys/{key_id}
+      - path: /nodes/{node_id}/invites/{invite_id}
+        node: node_id
         methods: [DELETE]
+      # A person, by their directory member.
       - path: /members/{member_id}
-        methods: [GET, PATCH, DELETE]
-      - path: /members/{member_id}/user
-        methods: [GET]
-      - path: /members/{member_id}/api-keys
-        methods: [GET]
-      - path: /members/{member_id}/api-keys/{key_id}
-        methods: [DELETE]
-      - path: /users
-        methods: [GET]
-      - path: /users/{user_id}
-        methods: [GET, PATCH, DELETE]
-      - path: /users/{user_id}/status
+        methods: [GET, DELETE]
+      - path: /members/{member_id}/status
         methods: [PATCH]
-      - path: /users/{user_id}/memberships
+      - path: /members/{member_id}/nodes
         methods: [GET]
-      - path: /users/{user_id}/organizations
-        methods: [POST]
-      - path: /users/{user_id}/invites/redeem
-        methods: [POST]
-      - path: /users/{user_id}/api-keys
+      - path: /members/{member_id}/keys
         methods: [GET]
-      - path: /users/{user_id}/api-keys/{key_id}
+      - path: /members/{member_id}/keys/{key_id}
         methods: [DELETE]
+      - path: /members/{member_id}/invites/redeem
+        methods: [POST]
   audit:
     url: http://audit:3002
     routes:
-      - path: /organizations/{organization_id}/audit-events
+      - path: /nodes/{node_id}/audit-events
+        node: node_id
         methods: [GET]
-      - path: /users/{user_id}/audit-events
+      - path: /members/{member_id}/audit-events
         methods: [GET]
   operator-audit:
     url: http://operator-audit:5005

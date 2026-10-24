@@ -118,7 +118,10 @@ type eventResponse struct {
 	OccurredAt    string            `json:"occurred_at"`
 	RequestID     string            `json:"request_id"`
 	Actor         Actor             `json:"actor"`
-	Upstream      *string           `json:"upstream"`
+	ActingAs      *ActingAs         `json:"acting_as"`
+	RootID        *string           `json:"root_id"`
+	Nodes         []Node            `json:"nodes"`
+	Service       *string           `json:"service"`
 	Method        string            `json:"method"`
 	Route         *string           `json:"route"`
 	Params        map[string]string `json:"params"`
@@ -128,8 +131,8 @@ type eventResponse struct {
 	Outcome       string            `json:"outcome"`
 	Status        *int              `json:"status"`
 	ResponseBytes *int64            `json:"response_bytes"`
-	Decision      json.RawMessage   `json:"decision"`
 	Details       json.RawMessage   `json:"details"`
+	CreatedID     *string           `json:"created_id"`
 }
 
 func toResponse(e *Event) eventResponse {
@@ -137,12 +140,19 @@ func toResponse(e *Event) eventResponse {
 	if params == nil {
 		params = map[string]string{}
 	}
+	nodes := e.Nodes
+	if nodes == nil {
+		nodes = []Node{}
+	}
 	return eventResponse{
 		ID:            e.ID,
 		OccurredAt:    e.OccurredAt.UTC().Format("2006-01-02T15:04:05.000Z"),
 		RequestID:     e.RequestID,
 		Actor:         e.Actor,
-		Upstream:      e.Upstream,
+		ActingAs:      e.ActingAs,
+		RootID:        e.RootID,
+		Nodes:         nodes,
+		Service:       e.Service,
 		Method:        e.Method,
 		Route:         e.Route,
 		Params:        params,
@@ -153,6 +163,7 @@ func toResponse(e *Event) eventResponse {
 		Status:        e.Status,
 		ResponseBytes: e.ResponseBytes,
 		Details:       e.Details,
+		CreatedID:     e.CreatedID,
 	}
 }
 

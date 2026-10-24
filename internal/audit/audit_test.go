@@ -65,16 +65,19 @@ func writer(t *testing.T, url string) (*Writer, *metrics.Registry) {
 }
 
 func intent() *Intent {
-	route := "/organizations/{organization_id}"
-	up := "identity"
+	route := "/nodes/{node_id}"
+	service := "identity"
+	root := "n_org"
 	return &Intent{
 		RequestID:  "req1",
 		OccurredAt: Timestamp(time.Now()),
 		Actor:      Actor{Issuer: "https://idp.test", OperatorID: "op_1"},
-		Upstream:   &up,
+		RootID:     &root,
+		Nodes:      []Node{{Kind: "organization", ID: "n_org"}},
+		Service:    &service,
 		Method:     "GET",
 		Route:      &route,
-		Params:     map[string]string{"organization_id": "org_1"},
+		Params:     map[string]string{"node_id": "n_org"},
 		IP:         "127.0.0.1",
 	}
 }
@@ -188,7 +191,7 @@ func TestOutcomeRetriesAndStops(t *testing.T) {
 			if r.Method != "PATCH" || r.URL.Path != "/internal/events/req1" {
 				t.Fatalf("%s %s", r.Method, r.URL.Path)
 			}
-			if body != `{"outcome":"rejected","status":404,"response_bytes":10,"decision":null,"details":null}` {
+			if body != `{"outcome":"rejected","status":404,"response_bytes":10,"details":null,"created_id":null}` {
 				t.Fatalf("body %s", body)
 			}
 		})
@@ -240,15 +243,15 @@ func TestOutcomeFor(t *testing.T) {
 		want    string
 	}{
 		{"responded", State{Forwarded: true, UpstreamStatus: 200, Details: details}, 200,
-			`{"outcome":"responded","status":200,"response_bytes":7,"decision":null,"details":{"a":1}}`},
+			`{"outcome":"responded","status":200,"response_bytes":7,"details":{"a":1},"created_id":null}`},
 		{"responded, client gone mid-body", State{Forwarded: true, UpstreamStatus: 200, ClientGone: true}, 200,
-			`{"outcome":"responded","status":200,"response_bytes":7,"decision":null,"details":null}`},
+			`{"outcome":"responded","status":200,"response_bytes":7,"details":null,"created_id":null}`},
 		{"no response", State{Forwarded: true}, 503,
-			`{"outcome":"no_response","status":503,"response_bytes":7,"decision":null,"details":null}`},
+			`{"outcome":"no_response","status":503,"response_bytes":7,"details":null,"created_id":null}`},
 		{"no response, client gone", State{Forwarded: true, ClientGone: true}, 503,
-			`{"outcome":"no_response","status":null,"response_bytes":7,"decision":null,"details":null}`},
+			`{"outcome":"no_response","status":null,"response_bytes":7,"details":null,"created_id":null}`},
 		{"rejected", State{}, 404,
-			`{"outcome":"rejected","status":404,"response_bytes":7,"decision":null,"details":null}`},
+			`{"outcome":"rejected","status":404,"response_bytes":7,"details":null,"created_id":null}`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -305,4 +308,30 @@ func scrape(reg *metrics.Registry) string {
 	w := httptest.NewRecorder()
 	reg.ServeHTTP(w, httptest.NewRequest("GET", "/metrics", nil))
 	return w.Body.String()
+}
+
+func TestParseCreated(t *testing.T) {
+	for _, ok := range []string{"n_01J", "ver_01JA2Z6R", strings.Repeat("a", MaxCreatedLen)} {
+		if id, good := ParseCreated([]string{ok}); !good || *id != ok {
+			t.Errorf("%q refused", ok)
+		}
+	}
+	for _, bad := range [][]string{
+		{""}, {"a/b"}, {"a b"}, {"a?b"}, {"a#b"}, {"."}, {".."}, {"é"}, {"a\x00"},
+		{strings.Repeat("a", MaxCreatedLen+1)}, {"a", "b"},
+	} {
+		if _, good := ParseCreated(bad); good {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	created := "n_new"
+	b, _ := json.Marshal(OutcomeFor(&State{Forwarded: true, UpstreamStatus: 201, CreatedID: &created}, 201, 2))
+	if string(b) != `{"outcome":"responded","status":201,"response_bytes":2,"details":null,"created_id":"n_new"}` {
+		t.Fatalf("%s", b)
+	}
+	// Only a response names what it created.
+	b, _ = json.Marshal(OutcomeFor(&State{Forwarded: true, CreatedID: &created}, 502, 2))
+	if !strings.Contains(string(b), `"created_id":null`) {
+		t.Fatalf("%s", b)
+	}
 }

@@ -18,7 +18,7 @@ var ErrNotFound = errors.New("not found")
 
 const queryTimeout = 5 * time.Second
 
-// Store is the audit_events table, used as the writer role (docs/audit.md#roles).
+// Store is the audit_events table, used as the writer role (docs/internals/audit-storage.md#roles).
 type Store struct {
 	pool *pgxpool.Pool
 }
@@ -26,8 +26,8 @@ type Store struct {
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
 const eventColumns = `id, occurred_at, request_id, actor_issuer, actor_operator_id, actor_email,
-	actor_client_id, upstream, method, route, params, path, ip, user_agent, outcome, status,
-	response_bytes, details`
+	actor_client_id, acting_as_member_id, acting_as_principal, root_id, nodes, service, method, route,
+	params, path, ip, user_agent, outcome, status, response_bytes, details, created_id`
 
 // CreateIntent writes a pending event unless one exists for the request id. created is
 // false for a retry, which leaves the existing event as it is.
@@ -38,20 +38,34 @@ func (s *Store) CreateIntent(ctx context.Context, in *Intent) (created bool, err
 	if err != nil {
 		return false, err
 	}
+	nodes, err := json.Marshal(in.Nodes)
+	if err != nil {
+		return false, err
+	}
+	nodeIDs := make([]string, len(in.Nodes))
+	for i, n := range in.Nodes {
+		nodeIDs[i] = n.ID
+	}
+	var actingAs, principal *string
+	if in.ActingAs != nil {
+		actingAs, principal = &in.ActingAs.MemberID, &in.ActingAs.Principal
+	}
 	insert := func() (pgconn.CommandTag, error) {
 		// request_id alone is the dedupe. The unique index has occurred_at too (the
 		// partition key), so check request_id here and let the index catch two
 		// identical intents racing.
 		return s.pool.Exec(ctx, `
 			INSERT INTO audit_events (id, occurred_at, request_id, actor_issuer, actor_operator_id,
-				actor_email, actor_client_id, upstream, method, route, params, path, ip, user_agent)
+				actor_email, actor_client_id, acting_as_member_id, acting_as_principal, root_id, nodes,
+				node_ids, service, method, route, params, path, ip, user_agent)
 			SELECT $1::text, $2::timestamptz, $3::text, $4::text, $5::text, $6::text, $7::text,
-				$8::text, $9::text, $10::text, $11::jsonb, $12::text, $13::text, $14::text
+				$8::text, $9::text, $10::text, $11::jsonb, $12::text[], $13::text, $14::text, $15::text,
+				$16::jsonb, $17::text, $18::text, $19::text
 			WHERE NOT EXISTS (SELECT 1 FROM audit_events WHERE request_id = $3::text)
 			ON CONFLICT DO NOTHING
 		`, newID(in.OccurredAt), in.OccurredAt, in.RequestID, in.Actor.Issuer, in.Actor.OperatorID,
-			in.Actor.Email, in.Actor.ClientID, in.Upstream, in.Method, in.Route, string(params), in.Path,
-			in.IP, in.UserAgent)
+			in.Actor.Email, in.Actor.ClientID, actingAs, principal, in.RootID, string(nodes), nodeIDs,
+			in.Service, in.Method, in.Route, string(params), in.Path, in.IP, in.UserAgent)
 	}
 	tag, err := insert()
 	if isNoPartition(err) {
@@ -78,9 +92,9 @@ func (s *Store) ApplyOutcome(ctx context.Context, requestID string, out *Outcome
 	}
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE audit_events
-		SET outcome = $2, status = $3, response_bytes = $4, details = $5::jsonb
+		SET outcome = $2, status = $3, response_bytes = $4, details = $5::jsonb, created_id = $6
 		WHERE request_id = $1 AND outcome = 'pending'
-	`, requestID, out.Outcome, out.Status, out.ResponseBytes, details)
+	`, requestID, out.Outcome, out.Status, out.ResponseBytes, details, out.CreatedID)
 	if err != nil {
 		return false, fmt.Errorf("apply outcome: %w", err)
 	}
@@ -118,8 +132,17 @@ func (s *Store) List(ctx context.Context, f Filter) ([]*Event, bool, error) {
 	if f.OperatorID != "" {
 		add("actor_operator_id = ?", f.OperatorID)
 	}
-	if f.Upstream != "" {
-		add("upstream = ?", f.Upstream)
+	if f.ActingAsMember != "" {
+		add("acting_as_member_id = ?", f.ActingAsMember)
+	}
+	if f.NodeID != "" {
+		add("node_ids @> ARRAY[?::text]", f.NodeID)
+	}
+	if f.Service != "" {
+		add("service = ?", f.Service)
+	}
+	if f.CreatedID != "" {
+		add("created_id = ?", f.CreatedID)
 	}
 	if f.Method != "" {
 		add("method = ?", f.Method)
@@ -181,15 +204,23 @@ func (s *Store) List(ctx context.Context, f Filter) ([]*Event, bool, error) {
 
 func scanEvent(row pgx.Row) (*Event, error) {
 	var e Event
-	var params, details []byte
+	var params, nodes, details []byte
+	var actingAs, principal *string
 	if err := row.Scan(&e.ID, &e.OccurredAt, &e.RequestID, &e.Actor.Issuer, &e.Actor.OperatorID,
-		&e.Actor.Email, &e.Actor.ClientID, &e.Upstream, &e.Method, &e.Route, &params, &e.Path, &e.IP,
-		&e.UserAgent, &e.Outcome, &e.Status, &e.ResponseBytes, &details); err != nil {
+		&e.Actor.Email, &e.Actor.ClientID, &actingAs, &principal, &e.RootID, &nodes, &e.Service, &e.Method,
+		&e.Route, &params, &e.Path, &e.IP, &e.UserAgent, &e.Outcome, &e.Status, &e.ResponseBytes, &details,
+		&e.CreatedID); err != nil {
 		return nil, err
 	}
 	e.OccurredAt = e.OccurredAt.UTC()
 	if err := json.Unmarshal(params, &e.Params); err != nil {
 		return nil, fmt.Errorf("params: %w", err)
+	}
+	if err := json.Unmarshal(nodes, &e.Nodes); err != nil {
+		return nil, fmt.Errorf("nodes: %w", err)
+	}
+	if actingAs != nil && principal != nil {
+		e.ActingAs = &ActingAs{MemberID: *actingAs, Principal: *principal}
 	}
 	if details != nil {
 		e.Details = json.RawMessage(details)

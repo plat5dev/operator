@@ -1,5 +1,5 @@
 // Package events is operator-audit: it stores the staff audit log the gateway writes and
-// serves it back through the gateway. Contract: docs/audit.md.
+// serves it back through the gateway. Contract: docs/reference/api/operator-audit.md.
 package events
 
 import (
@@ -10,7 +10,7 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
-// Outcomes (docs/audit.md#event). Pending is the only one an intent writes.
+// Outcomes (docs/reference/api/operator-audit.md#event). Pending is the only one an intent writes.
 const (
 	OutcomePending    = "pending"
 	OutcomeRejected   = "rejected"
@@ -25,13 +25,29 @@ type Actor struct {
 	ClientID   *string `json:"client_id"`
 }
 
+// ActingAs is the member an /as/{member} request acted as.
+type ActingAs struct {
+	MemberID  string `json:"member_id"`
+	Principal string `json:"principal"`
+}
+
+// Node is one node of the route node's chain.
+type Node struct {
+	Kind string `json:"kind"`
+	ID   string `json:"id"`
+}
+
 // Intent is what the gateway knows before it answers or forwards.
 type Intent struct {
 	RequestID  string
 	OccurredAt time.Time
 	Actor      Actor
-	// Upstream and Route are nil when no route matched. Path is set only then.
-	Upstream  *string
+	ActingAs   *ActingAs
+	// RootID is Nodes[0].ID, nil when Nodes is empty.
+	RootID *string
+	Nodes  []Node
+	// Service and Route are nil when no route matched. Path is set only then.
+	Service   *string
 	Method    string
 	Route     *string
 	Params    map[string]string
@@ -41,12 +57,14 @@ type Intent struct {
 }
 
 // Outcome is how the request ended. Status is nil when the client was gone before an
-// answer, never on responded. Details is nil for null, and only set on responded.
+// answer, never on responded. Details and CreatedID are nil for null, and only set on
+// responded.
 type Outcome struct {
 	Outcome       string
 	Status        *int
 	ResponseBytes int64
 	Details       json.RawMessage
+	CreatedID     *string
 }
 
 // Event is one stored request. The outcome fields are empty while pending.
@@ -57,6 +75,7 @@ type Event struct {
 	Status        *int
 	ResponseBytes *int64
 	Details       json.RawMessage
+	CreatedID     *string
 }
 
 // Filter is one list query. Zero values do not filter.
@@ -64,7 +83,11 @@ type Filter struct {
 	Limit          int
 	StartingAfter  string
 	OperatorID     string
-	Upstream       string
+	ActingAsMember string
+	// NodeID matches events on the node or below it: whose chain contains it.
+	NodeID         string
+	Service        string
+	CreatedID      string
 	Method         string
 	Route          string
 	Outcome        string

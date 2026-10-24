@@ -113,7 +113,7 @@ func TestIntentThenOutcome(t *testing.T) {
 		t.Fatalf("bad intent %d", w.Code)
 	}
 
-	outcome := `{"outcome":"responded","status":200,"response_bytes":3,"decision":null,"details":{"a":1}}`
+	outcome := `{"outcome":"responded","status":200,"response_bytes":3,"details":{"a":1},"created_id":null}`
 	if w := call(h, "PATCH", "/internal/events/r1", outcome, "tok"); w.Code != 204 {
 		t.Fatalf("outcome %d %s", w.Code, w.Body)
 	}
@@ -157,10 +157,19 @@ func TestList(t *testing.T) {
 	if e["occurred_at"] != "2026-10-09T18:30:00.123Z" || e["outcome"] != "pending" {
 		t.Fatalf("%v", e)
 	}
-	for _, k := range []string{"status", "response_bytes", "decision", "details", "path"} {
+	for _, k := range []string{"status", "response_bytes", "details", "created_id", "path"} {
 		if v, ok := e[k]; !ok || v != nil {
 			t.Errorf("%s = %v, want null", k, v)
 		}
+	}
+	if e["service"] != "identity" || e["root_id"] != "n_org" || len(e["nodes"].([]any)) != 2 {
+		t.Fatalf("%v", e)
+	}
+	if a := e["acting_as"].(map[string]any); a["member_id"] != "m_dana" || a["principal"] != "person" {
+		t.Fatalf("acting_as %v", a)
+	}
+	if _, ok := e["decision"]; ok {
+		t.Error("decision is not a field")
 	}
 	if actor := e["actor"].(map[string]any); actor["email"] != nil || actor["client_id"] != "console" {
 		t.Fatalf("actor %v", actor)

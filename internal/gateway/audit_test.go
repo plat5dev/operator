@@ -75,18 +75,19 @@ func TestAuditForwarded(t *testing.T) {
 		if rec.count() != 1 {
 			t.Error("the service was called before the intent was written")
 		}
-		w.Header().Set(audit.DetailsHeader, `{"role":{"from":"developer","to":"admin"}}`)
-		w.WriteHeader(http.StatusOK)
-		_, _ = io.WriteString(w, `{"id":"m_1"}`)
+		w.Header().Set(audit.DetailsHeader, `{"label":"Apps"}`)
+		w.Header().Set(audit.CreatedHeader, "n_new")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"id":"n_new"}`)
 	})
 	h, _ := setupWith(t, up.srv.URL, fakeAuth{}, 0, rec, nil)
-	w := do(h, "POST", "/organizations/org_1/members?q=secret", map[string]string{
+	w := do(h, "POST", "/as/m_dana/nodes/n_proj/children/env?q=secret", map[string]string{
 		"Authorization":     "Bearer good",
 		"User-Agent":        "console/1.0",
 		audit.DetailsHeader: `{"forged":true}`,
 	})
-	if w.Code != 200 || w.Header().Get(audit.DetailsHeader) != "" {
-		t.Fatalf("status %d, details header %q", w.Code, w.Header().Get(audit.DetailsHeader))
+	if w.Code != 201 || w.Header().Get(audit.DetailsHeader) != "" || w.Header().Get(audit.CreatedHeader) != "" {
+		t.Fatalf("status %d, headers %v", w.Code, w.Header())
 	}
 	if up.seen().Header.Get(audit.DetailsHeader) != "" {
 		t.Fatal("a client's details header reached the upstream")
@@ -102,11 +103,17 @@ func TestAuditForwarded(t *testing.T) {
 	}
 	delete(got, "occurred_at")
 	want := map[string]any{
-		"actor":      map[string]any{"issuer": "https://idp.test", "operator_id": "op_1", "email": "a@x.test", "client_id": "operator-console"},
-		"upstream":   "identity",
+		"actor":     map[string]any{"issuer": "https://idp.test", "operator_id": "op_1", "email": "a@x.test", "client_id": "operator-console"},
+		"acting_as": map[string]any{"member_id": "m_dana", "principal": "person"},
+		"root_id":   "n_org",
+		"nodes": []any{
+			map[string]any{"kind": "organization", "id": "n_org"},
+			map[string]any{"kind": "project", "id": "n_proj"},
+		},
+		"service":    "identity",
 		"method":     "POST",
-		"route":      "/organizations/{organization_id}/members",
-		"params":     map[string]any{"organization_id": "org_1"},
+		"route":      "/as/{member}/nodes/{node_id}/children/{kind}",
+		"params":     map[string]any{"member": "m_dana", "node_id": "n_proj", "kind": "env"},
 		"path":       nil,
 		"ip":         "192.0.2.1",
 		"user_agent": "console/1.0",
@@ -117,8 +124,8 @@ func TestAuditForwarded(t *testing.T) {
 		t.Fatalf("intent\n got %s\nwant %s", gotJSON, wantJSON)
 	}
 
-	if out.Outcome != audit.Responded || *out.Status != 200 || out.ResponseBytes != int64(len(`{"id":"m_1"}`)) ||
-		string(out.Details) != `{"role":{"from":"developer","to":"admin"}}` {
+	if out.Outcome != audit.Responded || *out.Status != 201 || out.ResponseBytes != int64(len(`{"id":"n_new"}`)) ||
+		string(out.Details) != `{"label":"Apps"}` || out.CreatedID == nil || *out.CreatedID != "n_new" {
 		t.Fatalf("outcome %+v details %s", out, out.Details)
 	}
 }
@@ -127,11 +134,19 @@ func TestAuditRejected(t *testing.T) {
 	cases := []struct {
 		name, method, path string
 		status             int
-		wantPath           string
+		// wantPath is set when no route matched.
+		wantPath string
+		nodes    int
+		actingAs bool
 	}{
-		{"unacceptable path", "GET", "/organizations/x/../org_1/members", 400, "/organizations/x/../org_1/members"},
-		{"no route", "GET", "/users/u_1/memberships", 404, "/users/u_1/memberships"},
-		{"method not listed", "DELETE", "/organizations", 404, "/organizations"},
+		{"unacceptable path", "GET", "/nodes/x/../n_org/members", 400, "/nodes/x/../n_org/members", 0, false},
+		{"no route", "GET", "/users/u_1/memberships", 404, "/users/u_1/memberships", 0, false},
+		{"method not listed", "DELETE", "/nodes", 404, "/nodes", 0, false},
+		{"as on a route without as_member", "GET", "/as/m_dana/nodes/n_org", 404, "/as/m_dana/nodes/n_org", 0, false},
+		{"node not found", "GET", "/nodes/n_missing", 404, "", 0, false},
+		{"member not active", "POST", "/as/m_gone/nodes/n_proj/children/env", 400, "", 2, false},
+		{"identity down", "GET", "/nodes/n_down", 503, "", 0, false},
+		{"identity down for the member", "POST", "/as/m_down/nodes/n_proj/children/env", 503, "", 0, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -143,8 +158,15 @@ func TestAuditRejected(t *testing.T) {
 				t.Fatalf("status %d", w.Code)
 			}
 			in, out := rec.only(t, w)
-			if in.Route != nil || in.Upstream != nil || in.Path == nil || *in.Path != c.wantPath || len(in.Params) != 0 {
-				t.Fatalf("intent route %v upstream %v path %v params %v", in.Route, in.Upstream, in.Path, in.Params)
+			if c.wantPath != "" {
+				if in.Route != nil || in.Service != nil || in.Path == nil || *in.Path != c.wantPath || len(in.Params) != 0 {
+					t.Fatalf("intent route %v service %v path %v params %v", in.Route, in.Service, in.Path, in.Params)
+				}
+			} else if in.Route == nil || in.Service == nil || in.Path != nil {
+				t.Fatalf("intent route %v service %v path %v", in.Route, in.Service, in.Path)
+			}
+			if len(in.Nodes) != c.nodes || (c.nodes == 0) != (in.RootID == nil) || (in.ActingAs != nil) != c.actingAs {
+				t.Fatalf("intent nodes %v root %v acting_as %v", in.Nodes, in.RootID, in.ActingAs)
 			}
 			if out.Outcome != audit.Rejected || *out.Status != c.status || out.Details != nil {
 				t.Fatalf("outcome %+v", out)
@@ -160,10 +182,10 @@ func TestAuditSkipsUnauthenticated(t *testing.T) {
 	rec := &recordingAudit{}
 	reg := metrics.NewRegistry()
 	h, _ := setupWith(t, "http://127.0.0.1:1", fakeAuth{}, 0, rec, reg)
-	do(h, "GET", "/organizations", nil)
-	do(h, "GET", "/organizations", map[string]string{"Authorization": "Bearer bad"})
-	do(h, "GET", "/organizations", map[string]string{"Authorization": "Bearer old"})
-	do(h, "OPTIONS", "/organizations", map[string]string{"Origin": "https://console.test", "Access-Control-Request-Method": "GET"})
+	do(h, "GET", "/nodes", nil)
+	do(h, "GET", "/nodes", map[string]string{"Authorization": "Bearer bad"})
+	do(h, "GET", "/nodes", map[string]string{"Authorization": "Bearer old"})
+	do(h, "OPTIONS", "/nodes", map[string]string{"Origin": "https://console.test", "Access-Control-Request-Method": "GET"})
 	if rec.count() != 0 || len(rec.outcomes) != 0 {
 		t.Fatalf("%d intents, %d outcomes", rec.count(), len(rec.outcomes))
 	}
@@ -180,7 +202,7 @@ func TestAuditSkipsUnauthenticated(t *testing.T) {
 	}
 
 	h, _ = setupWith(t, "http://127.0.0.1:1", fakeAuth{err: auth.ErrNoKeys}, 0, rec, nil)
-	if w := do(h, "GET", "/organizations", map[string]string{"Authorization": "Bearer good"}); w.Code != 503 || rec.count() != 0 {
+	if w := do(h, "GET", "/nodes", map[string]string{"Authorization": "Bearer good"}); w.Code != 503 || rec.count() != 0 {
 		t.Fatalf("no keys: status %d, %d intents", w.Code, rec.count())
 	}
 }
@@ -189,7 +211,7 @@ func TestAuditIntentNotWritten(t *testing.T) {
 	rec := &recordingAudit{err: audit.ErrIntentNotWritten}
 	up := newUpstream(t, nil)
 	h, _ := setupWith(t, up.srv.URL, fakeAuth{}, 0, rec, nil)
-	for _, path := range []string{"/organizations", "/nope", "//organizations"} {
+	for _, path := range []string{"/nodes", "/nope", "//organizations"} {
 		w := do(h, "GET", path, map[string]string{"Authorization": "Bearer good"})
 		if w.Code != 503 || decode(t, w).Error.Code != "SERVICE_UNAVAILABLE" {
 			t.Fatalf("%s: status %d", path, w.Code)
@@ -213,9 +235,9 @@ func TestAuditNoResponse(t *testing.T) {
 	l.Close()
 	rec := &recordingAudit{}
 	h, _ := setupWith(t, "http://"+addr, fakeAuth{}, 0, rec, nil)
-	w := do(h, "GET", "/organizations", map[string]string{"Authorization": "Bearer good"})
+	w := do(h, "GET", "/nodes", map[string]string{"Authorization": "Bearer good"})
 	_, out := rec.only(t, w)
-	if w.Code != 503 || out.Outcome != audit.NoResponse || *out.Status != 503 {
+	if w.Code != 502 || out.Outcome != audit.NoResponse || *out.Status != 502 {
 		t.Fatalf("status %d outcome %+v", w.Code, out)
 	}
 }
@@ -228,7 +250,7 @@ func TestAuditClientGone(t *testing.T) {
 	})
 	rec := &recordingAudit{}
 	h, _ := setupWith(t, up.srv.URL, fakeAuth{}, 0, rec, nil)
-	r := httptest.NewRequest("GET", "/organizations", nil).WithContext(ctx)
+	r := httptest.NewRequest("GET", "/nodes", nil).WithContext(ctx)
 	r.Header.Set("Authorization", "Bearer good")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
@@ -242,19 +264,20 @@ func TestAuditDetailsUnusable(t *testing.T) {
 	rec := &recordingAudit{}
 	up := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(audit.DetailsHeader, `[1,2]`)
+		w.Header().Set(audit.CreatedHeader, "a/b")
 		w.WriteHeader(http.StatusNoContent)
 	})
 	h, logs := setupWith(t, up.srv.URL, fakeAuth{}, 0, rec, nil)
-	w := do(h, "PATCH", "/organizations/org_1", map[string]string{"Authorization": "Bearer good"})
-	if w.Header().Get(audit.DetailsHeader) != "" {
-		t.Fatal("details header reached the client")
+	w := do(h, "PATCH", "/nodes/n_org", map[string]string{"Authorization": "Bearer good"})
+	if w.Header().Get(audit.DetailsHeader) != "" || w.Header().Get(audit.CreatedHeader) != "" {
+		t.Fatal("audit header reached the client")
 	}
 	_, out := rec.only(t, w)
-	if out.Outcome != audit.Responded || out.Details != nil {
+	if out.Outcome != audit.Responded || out.Details != nil || out.CreatedID != nil {
 		t.Fatalf("outcome %+v", out)
 	}
-	if !strings.Contains(logs.String(), "ignoring audit details") {
-		t.Fatal("unusable details not logged")
+	if !strings.Contains(logs.String(), "ignoring audit details") || !strings.Contains(logs.String(), "ignoring an audit created id") {
+		t.Fatal("unusable audit headers not logged")
 	}
 }
 
@@ -262,9 +285,9 @@ func TestAuditParamsAreStorable(t *testing.T) {
 	rec := &recordingAudit{}
 	up := newUpstream(t, nil)
 	h, _ := setupWith(t, up.srv.URL, fakeAuth{}, 0, rec, nil)
-	w := do(h, "GET", "/organizations/a%00b%FF/members", map[string]string{"Authorization": "Bearer good"})
+	w := do(h, "GET", "/members/a%00b%FF", map[string]string{"Authorization": "Bearer good"})
 	in, _ := rec.only(t, w)
-	if got := in.Params["organization_id"]; got != "a�b�" {
+	if got := in.Params["member_id"]; got != "a\uFFFDb\uFFFD" {
 		t.Fatalf("param %q", got)
 	}
 }
@@ -275,7 +298,7 @@ func TestDetailsStrippedWithAuditOff(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 	h, _ := setup(t, up.srv.URL, fakeAuth{}, 0)
-	w := do(h, "PATCH", "/organizations/org_1", map[string]string{"Authorization": "Bearer good", audit.DetailsHeader: `{"b":2}`})
+	w := do(h, "PATCH", "/nodes/n_org", map[string]string{"Authorization": "Bearer good", audit.DetailsHeader: `{"b":2}`})
 	if w.Code != 200 || w.Header().Get(audit.DetailsHeader) != "" || up.seen().Header.Get(audit.DetailsHeader) != "" {
 		t.Fatalf("status %d, response %q, upstream %q", w.Code, w.Header().Get(audit.DetailsHeader), up.seen().Header.Get(audit.DetailsHeader))
 	}

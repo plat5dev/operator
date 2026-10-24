@@ -35,6 +35,14 @@ func TestConfigDefaults(t *testing.T) {
 	if c.AuditURL != "http://operator-audit:8005" || c.AuditToken != "secret" {
 		t.Fatalf("audit = %q %q", c.AuditURL, c.AuditToken)
 	}
+	if c.IdentityURL != "" {
+		t.Fatalf("identity = %q", c.IdentityURL)
+	}
+	m := base()
+	m["IDENTITY_URL"] = "http://identity:3000/"
+	if c, err := loadConfig(env(m)); err != nil || c.IdentityURL != "http://identity:3000" {
+		t.Fatalf("identity = %q, %v", c.IdentityURL, err)
+	}
 }
 
 func TestConfigAuditOff(t *testing.T) {
@@ -77,7 +85,7 @@ func TestConfigErrors(t *testing.T) {
 		"origin path":      {"ALLOWED_ORIGINS": "https://a.test/app"},
 		"bad port":         {"INTERNAL_PORT": "http"},
 		"bad timeout":      {"UPSTREAM_TIMEOUT_MS": "0"},
-		"authz set":        {"AUTHZ_URL": "http://pdp:8080"},
+		"bad identity url": {"IDENTITY_URL": "identity:3000"},
 		"no audit url":     {"AUDIT_URL": ""},
 		"bad audit url":    {"AUDIT_URL": "operator-audit:8005"},
 		"no audit token":   {"AUDIT_TOKEN": ""},

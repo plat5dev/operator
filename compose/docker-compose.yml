@@ -1,6 +1,12 @@
-# Dev stack: gateway, Plat5 Auth as the staff IdP, an echo upstream, and the staff audit log
-# (Postgres and operator-audit). See README.md.
+# Dev stack: gateway, Plat5 Auth as the staff IdP, an echo service, and the staff audit log
+# (Postgres and operator-audit). The gateway joins Plat5's compose network to reach identity
+# and audit: start Plat5 first. See README.md.
 name: operator
+
+networks:
+  plat5:
+    external: true
+    name: ${PLAT5_NETWORK:-plat5_plat5}
 
 services:
   operator:
@@ -13,6 +19,7 @@ services:
       - "127.0.0.1:8004:8004"
     environment:
       ROUTES_FILE: /etc/operator/routes.yml
+      IDENTITY_URL: http://identity:3000
       # Plat5 Auth as the staff IdP: the operator id is its user id, and the email is
       # in the token because staff-auth sets AUTH_TOKEN_EMAIL.
       AUTH_ISSUER: http://localhost:5411
@@ -25,6 +32,9 @@ services:
       AUDIT_TOKEN: dev-audit-token
     volumes:
       - ./routes.yml:/etc/operator/routes.yml:ro
+    networks:
+      - default
+      - plat5
     depends_on:
       staff-auth:
         condition: service_healthy
@@ -96,7 +106,7 @@ services:
       retries: 10
 
   # The staff IdP: Plat5 Auth in dev mode, its own issuer and database. Never the
-  # customer issuer (docs/idp.md).
+  # customer issuer (docs/reference/idp.md).
   staff-auth:
     image: ghcr.io/plat5dev/auth:${AUTH_VERSION:-v0.2.2}
     ports:
@@ -123,6 +133,7 @@ services:
       retries: 12
       start_period: 10s
 
+  # Answers with the request it received: what a service is sent (routes.yml's echo).
   echo:
     image: traefik/whoami:v1.11
 

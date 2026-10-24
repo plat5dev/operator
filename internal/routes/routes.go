@@ -1,4 +1,5 @@
-// Package routes loads this gateway's route file and matches requests. Contract: docs/routes.md.
+// Package routes loads this gateway's route file and matches requests. Contract:
+// docs/reference/routes.md.
 package routes
 
 import (
@@ -14,32 +15,28 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Resource names the authz resource for a route. Validated now, used in slice 3.
-type Resource struct {
-	Type string `yaml:"type"`
-	ID   string `yaml:"id"`
-}
-
-// Upstream is one service address and the routes this gateway forwards to it.
-type Upstream struct {
+// Service is one service address and the routes this gateway forwards to it.
+type Service struct {
 	URL    string   `yaml:"url"`
 	Routes []*Route `yaml:"routes"`
 }
 
 type Route struct {
-	Path     string    `yaml:"path"`
-	Methods  []string  `yaml:"methods"`
-	Action   string    `yaml:"action"`
-	Resource *Resource `yaml:"resource"`
+	Path    string   `yaml:"path"`
+	Methods []string `yaml:"methods"`
+	// Node is the param holding the Plat5 node id the route addresses, or "".
+	Node string `yaml:"node"`
+	// AsMember also serves the route at /as/{member} + Path.
+	AsMember bool `yaml:"as_member"`
 
 	segments []segment
 	methods  map[string]bool
-	upstream string
+	service  string
 	target   *url.URL
 }
 
-// Upstream is the name of the upstream this route belongs to.
-func (r *Route) Upstream() string { return r.upstream }
+// Service is the name of the service this route belongs to.
+func (r *Route) Service() string { return r.service }
 
 // Target is the parsed upstream URL: scheme, host, and port.
 func (r *Route) Target() *url.URL { return r.target }
@@ -55,8 +52,24 @@ type Table struct {
 
 func (t *Table) Len() int { return len(t.routes) }
 
-// Routes returns every route, grouped by upstream name.
+// Routes returns every route, grouped by service name.
 func (t *Table) Routes() []*Route { return t.routes }
+
+// HasNodes is whether any route names a node, so the gateway needs identity.
+func (t *Table) HasNodes() bool {
+	for _, r := range t.routes {
+		if r.Node != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// asPrefix is the reserved first segment of /as/{member}/…, and member its param.
+const (
+	asPrefix    = "as"
+	memberParam = "member"
+)
 
 var (
 	nameRe  = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
@@ -78,45 +91,45 @@ func Load(path string) (*Table, error) {
 
 func Parse(data []byte) (*Table, error) {
 	var file struct {
-		Upstreams map[string]*Upstream `yaml:"upstreams"`
+		Services map[string]*Service `yaml:"services"`
 	}
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	if err := dec.Decode(&file); err != nil {
 		return nil, err
 	}
-	if file.Upstreams == nil {
-		return nil, errors.New("upstreams: missing")
+	if file.Services == nil {
+		return nil, errors.New("services: missing")
 	}
-	names := make([]string, 0, len(file.Upstreams))
-	for name := range file.Upstreams {
+	names := make([]string, 0, len(file.Services))
+	for name := range file.Services {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 
 	var all []*Route
 	for _, name := range names {
-		up := file.Upstreams[name]
+		svc := file.Services[name]
 		if !nameRe.MatchString(name) {
-			return nil, fmt.Errorf("upstreams.%s: name must match %s", name, nameRe)
+			return nil, fmt.Errorf("services.%s: name must match %s", name, nameRe)
 		}
-		if up == nil {
-			return nil, fmt.Errorf("upstreams.%s: empty", name)
+		if svc == nil {
+			return nil, fmt.Errorf("services.%s: empty", name)
 		}
-		target, err := parseURL(up.URL)
+		target, err := parseURL(svc.URL)
 		if err != nil {
-			return nil, fmt.Errorf("upstreams.%s.url: %w", name, err)
+			return nil, fmt.Errorf("services.%s.url: %w", name, err)
 		}
-		if len(up.Routes) == 0 {
-			return nil, fmt.Errorf("upstreams.%s.routes: missing", name)
+		if len(svc.Routes) == 0 {
+			return nil, fmt.Errorf("services.%s.routes: missing", name)
 		}
-		for i, r := range up.Routes {
+		for i, r := range svc.Routes {
 			if r == nil {
-				return nil, fmt.Errorf("upstreams.%s.routes[%d]: empty", name, i)
+				return nil, fmt.Errorf("services.%s.routes[%d]: empty", name, i)
 			}
-			r.upstream, r.target = name, target
+			r.service, r.target = name, target
 			if err := r.compile(); err != nil {
-				return nil, fmt.Errorf("upstreams.%s.routes[%d] %s: %w", name, i, r.Path, err)
+				return nil, fmt.Errorf("services.%s.routes[%d] %s: %w", name, i, r.Path, err)
 			}
 			all = append(all, r)
 		}
@@ -124,7 +137,7 @@ func Parse(data []byte) (*Table, error) {
 	for i, a := range all {
 		for _, b := range all[i+1:] {
 			if overlaps(a, b) {
-				return nil, fmt.Errorf("routes %s (%s) and %s (%s) can match the same request", a.Path, a.upstream, b.Path, b.upstream)
+				return nil, fmt.Errorf("routes %s (%s) and %s (%s) can match the same request", a.Path, a.service, b.Path, b.service)
 			}
 		}
 	}
@@ -147,8 +160,14 @@ func (r *Route) compile() error {
 		return errors.New("path must start with / and have a segment")
 	}
 	seen := map[string]bool{}
-	for _, s := range strings.Split(r.Path[1:], "/") {
+	for i, s := range strings.Split(r.Path[1:], "/") {
+		if i == 0 && s == asPrefix {
+			return errors.New("/as/ is reserved for acting as a member")
+		}
 		if m := paramRe.FindStringSubmatch(s); m != nil {
+			if m[1] == memberParam {
+				return errors.New("parameter member is reserved for /as/{member}")
+			}
 			if seen[m[1]] {
 				return fmt.Errorf("parameter %s repeated", m[1])
 			}
@@ -176,16 +195,11 @@ func (r *Route) compile() error {
 		r.methods[m] = true
 	}
 
-	if r.Action != "" && strings.TrimSpace(r.Action) == "" {
-		return errors.New("action: blank")
+	if r.Node != "" && !seen[r.Node] {
+		return fmt.Errorf("node %q is not a path parameter", r.Node)
 	}
-	if r.Resource != nil {
-		if r.Resource.Type == "" {
-			return errors.New("resource.type: missing")
-		}
-		if !seen[r.Resource.ID] {
-			return fmt.Errorf("resource.id %q is not a path parameter", r.Resource.ID)
-		}
+	if r.AsMember && r.Node == "" {
+		return errors.New("as_member needs node: the member is checked in the node's tree")
 	}
 	return nil
 }
@@ -213,19 +227,46 @@ func overlaps(a, b *Route) bool {
 	return true
 }
 
-// Match returns the route for this method and decoded path segments, and its parameters by name.
-func (t *Table) Match(method string, segs []string) (*Route, map[string]string) {
+// Match is a matched request.
+type Match struct {
+	Route *Route
+	// Params are the path params by name, member included when acting as one.
+	Params map[string]string
+	// Member is the member from /as/{member}, or "".
+	Member string
+}
+
+// Template is the matched path template, /as/{member} included when acting as one.
+func (m *Match) Template() string {
+	if m.Member != "" {
+		return "/" + asPrefix + "/{" + memberParam + "}" + m.Route.Path
+	}
+	return m.Route.Path
+}
+
+// NodeID is the route node's id, or "" when the route names none.
+func (m *Match) NodeID() string {
+	if m.Route.Node == "" {
+		return ""
+	}
+	return m.Params[m.Route.Node]
+}
+
+// Match returns the route for this method and decoded path segments, or nil. A path
+// starting /as/{member}/ matches only routes with as_member, against the rest.
+func (t *Table) Match(method string, segs []string) *Match {
+	member := ""
+	if len(segs) > 2 && segs[0] == asPrefix {
+		member, segs = segs[1], segs[2:]
+	}
 	for _, r := range t.routes {
-		if len(r.segments) != len(segs) || !r.methods[method] {
+		if len(r.segments) != len(segs) || !r.methods[method] || (member != "" && !r.AsMember) {
 			continue
 		}
-		var params map[string]string
+		params := map[string]string{}
 		ok := true
 		for i, s := range r.segments {
 			if s.param != "" {
-				if params == nil {
-					params = map[string]string{}
-				}
 				params[s.param] = segs[i]
 				continue
 			}
@@ -235,10 +276,13 @@ func (t *Table) Match(method string, segs []string) (*Route, map[string]string) 
 			}
 		}
 		if ok {
-			return r, params
+			if member != "" {
+				params[memberParam] = member
+			}
+			return &Match{Route: r, Params: params, Member: member}
 		}
 	}
-	return nil, nil
+	return nil
 }
 
 // ErrBadPath is a path this gateway could read differently from the service.

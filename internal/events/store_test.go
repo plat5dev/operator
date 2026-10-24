@@ -33,16 +33,20 @@ func writerStore(t *testing.T) *Store {
 	return NewStore(writer)
 }
 
+// matched is a read of a project's members in an org: the chain is the org, then the project.
 func matched(requestID, operator, organization string, at time.Time) *Intent {
-	up, route, email := "identity", "/organizations/{organization_id}/members", "a@x.test"
+	service, route, email := "identity", "/nodes/{node_id}/members", "a@x.test"
+	project := "p_" + organization
 	return &Intent{
 		RequestID:  requestID,
 		OccurredAt: at.UTC().Truncate(time.Millisecond),
 		Actor:      Actor{Issuer: "https://idp.test", OperatorID: operator, Email: &email},
-		Upstream:   &up,
+		RootID:     &organization,
+		Nodes:      []Node{{Kind: "organization", ID: organization}, {Kind: "project", ID: project}},
+		Service:    &service,
 		Method:     "GET",
 		Route:      &route,
-		Params:     map[string]string{"organization_id": organization},
+		Params:     map[string]string{"node_id": project},
 		IP:         "10.0.0.1",
 	}
 }
@@ -63,14 +67,15 @@ func TestStoreWrites(t *testing.T) {
 	path := "/nope"
 	unmatched := &Intent{RequestID: "r2", OccurredAt: at.UTC().Truncate(time.Millisecond),
 		Actor: Actor{Issuer: "https://idp.test", OperatorID: "op_1"}, Method: "GET",
-		Params: map[string]string{}, Path: &path, IP: "10.0.0.1"}
+		Nodes: []Node{}, Params: map[string]string{}, Path: &path, IP: "10.0.0.1"}
 	if _, err := s.CreateIntent(ctx, unmatched); err != nil {
 		t.Fatal(err)
 	}
 
 	status := 200
+	createdID := "b_new"
 	applied, err := s.ApplyOutcome(ctx, "r1", &Outcome{Outcome: OutcomeResponded, Status: &status,
-		ResponseBytes: 42, Details: json.RawMessage(`{"role":{"from":"a","to":"b"}}`)})
+		ResponseBytes: 42, Details: json.RawMessage(`{"role":{"from":"a","to":"b"}}`), CreatedID: &createdID})
 	if err != nil || !applied {
 		t.Fatalf("applied %v err %v", applied, err)
 	}
@@ -88,7 +93,8 @@ func TestStoreWrites(t *testing.T) {
 	e := list[0]
 	if e.Actor.OperatorID != "op_1" || e.Outcome != OutcomeResponded || *e.Status != 200 || *e.ResponseBytes != 42 ||
 		string(e.Details) != `{"role": {"to": "b", "from": "a"}}` || !e.OccurredAt.Equal(at.UTC().Truncate(time.Millisecond)) ||
-		*e.Actor.Email != "a@x.test" || e.Actor.ClientID != nil || e.Path != nil {
+		*e.Actor.Email != "a@x.test" || e.Actor.ClientID != nil || e.Path != nil || *e.CreatedID != "b_new" ||
+		*e.RootID != "org_1" || fmt.Sprint(e.Nodes) != "[{organization org_1} {project p_org_1}]" || e.ActingAs != nil {
 		t.Fatalf("%+v details %s", e, e.Details)
 	}
 	if !idTime(e.ID).Equal(e.OccurredAt) {
@@ -97,7 +103,7 @@ func TestStoreWrites(t *testing.T) {
 
 	list, _, _ = s.List(ctx, Filter{Limit: 10, RequestID: "r2"})
 	if len(list) != 1 || *list[0].Path != "/nope" || list[0].Route != nil || list[0].Outcome != OutcomePending ||
-		list[0].Status != nil || list[0].ResponseBytes != nil {
+		list[0].Status != nil || list[0].ResponseBytes != nil || list[0].RootID != nil || len(list[0].Nodes) != 0 {
 		t.Fatalf("%+v", list[0])
 	}
 }
@@ -107,13 +113,21 @@ func TestStoreList(t *testing.T) {
 	ctx := context.Background()
 	base := time.Now().Add(-time.Hour).UTC().Truncate(time.Millisecond)
 	for i := range 5 {
-		op, org := "op_1", fmt.Sprintf("org_%d", i%2)
+		org := fmt.Sprintf("org_%d", i%2)
+		in := matched(fmt.Sprintf("r%d", i), "op_1", org, base.Add(time.Duration(i)*time.Minute))
 		if i == 4 {
-			op = "op_2"
+			in.Actor.OperatorID = "op_2"
 		}
-		if _, err := s.CreateIntent(ctx, matched(fmt.Sprintf("r%d", i), op, org, base.Add(time.Duration(i)*time.Minute))); err != nil {
+		if i == 3 {
+			in.ActingAs = &ActingAs{MemberID: "m_dana", Principal: "person"}
+		}
+		if _, err := s.CreateIntent(ctx, in); err != nil {
 			t.Fatal(err)
 		}
+	}
+	status, created := 201, "n_new"
+	if _, err := s.ApplyOutcome(ctx, "r2", &Outcome{Outcome: OutcomeResponded, Status: &status, CreatedID: &created}); err != nil {
+		t.Fatal(err)
 	}
 	ids := func(f Filter) ([]string, bool) {
 		t.Helper()
@@ -146,14 +160,27 @@ func TestStoreList(t *testing.T) {
 	if got, _ := ids(Filter{OperatorID: "op_2"}); !eq(got, "r4") {
 		t.Fatalf("operator: %v", got)
 	}
-	if got, _ := ids(Filter{Params: map[string]string{"organization_id": "org_1"}}); !eq(got, "r3", "r1") {
+	if got, _ := ids(Filter{Params: map[string]string{"node_id": "p_org_1"}}); !eq(got, "r3", "r1") {
 		t.Fatalf("params: %v", got)
+	}
+	// By node: the org's events include its project's.
+	if got, _ := ids(Filter{NodeID: "org_0"}); !eq(got, "r4", "r2", "r0") {
+		t.Fatalf("node: %v", got)
+	}
+	if got, _ := ids(Filter{NodeID: "p_org_1"}); !eq(got, "r3", "r1") {
+		t.Fatalf("node below: %v", got)
+	}
+	if got, _ := ids(Filter{ActingAsMember: "m_dana"}); !eq(got, "r3") {
+		t.Fatalf("acting as: %v", got)
+	}
+	if got, _ := ids(Filter{CreatedID: "n_new"}); !eq(got, "r2") {
+		t.Fatalf("created: %v", got)
 	}
 	after, before := base.Add(time.Minute), base.Add(3*time.Minute)
 	if got, _ := ids(Filter{OccurredAfter: &after, OccurredBefore: &before}); !eq(got, "r2", "r1") {
 		t.Fatalf("time window: %v", got)
 	}
-	if got, _ := ids(Filter{Upstream: "identity", Method: "GET", Route: "/organizations/{organization_id}/members", Outcome: OutcomePending}); len(got) != 5 {
+	if got, _ := ids(Filter{Service: "identity", Method: "GET", Route: "/nodes/{node_id}/members", Outcome: OutcomePending}); len(got) != 4 {
 		t.Fatalf("exact filters: %v", got)
 	}
 	if got, _ := ids(Filter{Method: "POST"}); len(got) != 0 {

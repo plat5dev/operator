@@ -9,11 +9,13 @@ import (
 	"time"
 )
 
-// config is the gateway's environment. Contract: docs/model.md, docs/routes.md, docs/idp.md, docs/audit.md.
+// config is the gateway's environment. Contract: docs/reference/env.md.
 type config struct {
-	Addr            string
-	InternalPort    string
-	RoutesFile      string
+	Addr         string
+	InternalPort string
+	RoutesFile   string
+	// IdentityURL is Plat5 identity's public base URL. Required when a route names a node.
+	IdentityURL     string
 	Issuer          string
 	JWKSURI         string
 	Audiences       []string
@@ -21,7 +23,6 @@ type config struct {
 	EmailClaim      string
 	AllowedOrigins  []string
 	UpstreamTimeout time.Duration
-	AuthzURL        string
 	// AuditURL is operator-audit's internal base URL. Empty when audit is off.
 	AuditURL   string
 	AuditToken string
@@ -38,12 +39,12 @@ func loadConfig(getenv func(string) string) (config, error) {
 		Addr:         get("ADDR", ":5004"),
 		InternalPort: get("INTERNAL_PORT", "8004"),
 		RoutesFile:   get("ROUTES_FILE", "routes.yml"),
+		IdentityURL:  strings.TrimRight(get("IDENTITY_URL", ""), "/"),
 		Issuer:       get("AUTH_ISSUER", ""),
 		JWKSURI:      get("AUTH_JWKS_URI", ""),
 		Audiences:    list(getenv("AUTH_AUDIENCES")),
 		IDClaim:      get("AUTH_OPERATOR_ID_CLAIM", "sub"),
 		EmailClaim:   get("AUTH_OPERATOR_EMAIL_CLAIM", "email"),
-		AuthzURL:     get("AUTHZ_URL", ""),
 	}
 	var errs []error
 	if c.Issuer == "" {
@@ -71,8 +72,11 @@ func loadConfig(getenv func(string) string) (config, error) {
 		}
 		c.AllowedOrigins = append(c.AllowedOrigins, origin)
 	}
-	if c.AuthzURL != "" {
-		errs = append(errs, errors.New("AUTHZ_URL is slice 3 and not supported yet; unset it"))
+	if c.IdentityURL != "" {
+		if u, err := url.Parse(c.IdentityURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") ||
+			u.Host == "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+			errs = append(errs, errors.New("IDENTITY_URL must be an http or https URL"))
+		}
 	}
 	// Audit is on unless AUDIT_ENABLED=false. On, a forgotten URL fails boot instead of
 	// silently turning audit off.

@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
-# The staff audit log store: ghcr.io/plat5dev/operator-audit. Contract: docs/audit.md.
+# The staff audit log store: ghcr.io/plat5dev/operator-audit. Contract: docs/reference/api/operator-audit.md.
 FROM base AS operator-audit
 
 LABEL org.opencontainers.image.title="operator-audit" \

@@ -16,6 +16,7 @@ import (
 	"github.com/plat5dev/operator/internal/audit"
 	"github.com/plat5dev/operator/internal/auth"
 	"github.com/plat5dev/operator/internal/gateway"
+	"github.com/plat5dev/operator/internal/identity"
 	"github.com/plat5dev/operator/internal/metrics"
 	"github.com/plat5dev/operator/internal/routes"
 )
@@ -36,6 +37,9 @@ func run(log *slog.Logger) error {
 	table, err := routes.Load(cfg.RoutesFile)
 	if err != nil {
 		return err
+	}
+	if table.HasNodes() && cfg.IdentityURL == "" {
+		return errors.New("IDENTITY_URL is required: routes in " + cfg.RoutesFile + " name nodes")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -60,6 +64,9 @@ func run(log *slog.Logger) error {
 		Log:             log,
 	}
 	var auditWriter *audit.Writer
+	if cfg.IdentityURL != "" {
+		gw.Identity = identity.New(cfg.IdentityURL, nil)
+	}
 	if cfg.AuditURL != "" {
 		auditWriter = audit.New(audit.Config{URL: cfg.AuditURL, Token: cfg.AuditToken, Log: log, Metrics: reg})
 		gw.Audit = auditWriter
@@ -77,13 +84,13 @@ func run(log *slog.Logger) error {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Info("starting", "addr", cfg.Addr, "internal_port", cfg.InternalPort, "routes", table.Len(), "issuer", cfg.Issuer)
+	log.Info("starting", "addr", cfg.Addr, "internal_port", cfg.InternalPort, "routes", table.Len(),
+		"issuer", cfg.Issuer, "identity", cfg.IdentityURL)
 	if auditWriter != nil {
 		log.Info("audit: on", "url", cfg.AuditURL)
 	} else {
 		log.Warn("audit: off")
 	}
-	log.Warn("authz: none")
 
 	errc := make(chan error, 2)
 	for _, srv := range []*http.Server{api, internal} {
@@ -101,7 +108,7 @@ func run(log *slog.Logger) error {
 	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = api.Shutdown(shutdown)
-	// No more requests, so no more outcomes. Send what is queued (docs/audit.md#delivery).
+	// No more requests, so no more outcomes. Send what is queued (docs/concepts/audit.md#delivery).
 	if auditWriter != nil {
 		drain, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()

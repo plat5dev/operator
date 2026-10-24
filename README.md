@@ -1,19 +1,20 @@
 # Operator
 
-Headless staff gateway for a Plat5 deployment. Staff authenticate with your IdP and call the same private service APIs the customer gateway fronts.
+Headless staff gateway for a Plat5 deployment. Staff authenticate with your staff IdP and call the same private service APIs Plat5's gateway fronts, by node id.
 
-The customer gateway resolves slugs to node ids and sends services the caller's member id. This gateway checks a staff JWT, records the request in the staff audit log, then forwards the path the operator named, by node id, with `X-Plat5-Operator-Id`. That path is the target. An operator can act as a member (`/as/{member}/…`) on routes that allow it, so authored records name a real member. The record of who did what is the audit log, which `operator-audit` (also in this repo) keeps in the operator plane's Postgres.
+Plat5's gateway resolves slugs and sends services the caller's member id. This gateway checks a staff JWT, looks up the route node's chain in Plat5 identity, records the request in the staff audit log, then forwards the service's own path with the chain and `X-Plat5-Operator-Id`. An operator can act as a member (`/as/{member}/…`) on routes that allow it, so what they write is authored by a real member of the tree. The record of who did what is the staff audit log, which `operator-audit` (also in this repo) keeps in the operator plane's Postgres.
 
-Not part of the plat5 repo. Does not call the customer gateway. Serves no UI; a console is a separate client.
+Not part of the plat5 repo, and imports none of its code. Doesn't call Plat5's gateway. Serves no UI; a console is a separate client.
 
-Contract: [`docs/`](docs/). How to work here: [`AGENTS.md`](AGENTS.md). Deferred: [`TODO.md`](TODO.md). Run it: [`compose/`](compose/).
+Contract: [`docs/`](docs/README.md). How to work here: [`AGENTS.md`](AGENTS.md). Next and deferred: [`TODO.md`](TODO.md). Run it: [`compose/`](compose/README.md).
 
 ```bash
+# With Plat5's compose running (compose/README.md)
 cd compose
 docker compose up --build
 ```
 
-Gateway API on `:5004`, health and metrics on `:8004`. operator-audit on `:5005` (reached through the gateway) and `:8005` (health, metrics, the gateway's writes). The route list is `routes.yml` (identity's paths by node id, Plat5's audit reads, and the staff audit log read; mount a deployment copy in prod). Images: `ghcr.io/plat5dev/operator` and `ghcr.io/plat5dev/operator-audit` on `v*` tags.
+Gateway API on `:5004` (`:5410` in dev compose), health and metrics on `:8004`. operator-audit on `:5005` (reached through the gateway) and `:8005` (health, metrics, the gateway's writes). The route list is `routes.yml`: Plat5 identity's service API, Plat5's audit reads and the staff log read, at Plat5's compose addresses; mount a deployment copy in prod. Images: `ghcr.io/plat5dev/operator` and `ghcr.io/plat5dev/operator-audit` on `v*` tags.
 
 ## Layout
 
@@ -23,14 +24,16 @@ Gateway API on `:5004`, health and metrics on `:8004`. operator-audit on `:5005`
 | `cmd/operator/` | Gateway binary and config |
 | `cmd/operator-audit/` | Audit service binary: `migrate` and `serve` |
 | `internal/auth/` | Staff JWT validation |
-| `internal/routes/` | Route file and matching |
+| `internal/routes/` | Route file and matching, `/as/{member}` included |
+| `internal/identity/` | Plat5 identity client: node chains and member checks |
 | `internal/gateway/` | Request order, forwarding, request log |
 | `internal/audit/` | The gateway's audit writes: intent before forward, outcome after |
 | `internal/events/` | operator-audit's store, write API, and read route |
 | `internal/db/` | operator-audit's Postgres: migrations, owner and writer roles |
 | `internal/metrics/` | Prometheus text format for `/metrics` |
 | `internal/apierr/` | Plat5 error envelope |
-| `compose/` | Dev (with Plat5 Auth as the staff IdP, and Postgres) and prod compose |
+| `compose/` | Dev (with Plat5 Auth as the staff IdP, Postgres, an echo service, on Plat5's network) and prod compose |
+| `e2e/` | End-to-end tests against a running stack, opt-in |
 
 ## Tests
 
@@ -40,7 +43,7 @@ Store and role tests need Postgres and skip without it. Each makes its own datab
 OPERATOR_AUDIT_TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable go test ./...
 ```
 
-The URL must be a superuser.
+The URL must be a superuser. End to end, against Plat5 and the dev stack: [`e2e/`](e2e/README.md).
 
 ## License
 

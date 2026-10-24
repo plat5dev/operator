@@ -1,5 +1,5 @@
 #!/bin/sh
-# Creates the audit owner and writer roles (docs/audit.md#roles) and the schema the owner
+# Creates the audit owner and writer roles (docs/internals/audit-storage.md#roles) and the schema the owner
 # migrates. Postgres runs this once, on an empty data directory.
 set -eu
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \

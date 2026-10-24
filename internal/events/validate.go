@@ -12,12 +12,15 @@ import (
 	"unicode/utf8"
 )
 
-// Limits on what the gateway sends (docs/audit.md#event). The gateway truncates or
+// Limits on what the gateway sends (docs/reference/api/operator-audit.md#event). The gateway truncates or
 // cleans before it sends, so a value over a limit is a bug and gets 422.
 const (
 	maxRequestIDLen  = 128
 	maxActorLen      = 1024
-	maxUpstreamLen   = 128
+	maxIDLen         = 256
+	maxCreatedLen    = 128
+	maxNodes         = 32
+	maxServiceLen    = 128
 	maxMethodLen     = 32
 	maxRouteLen      = 2048
 	maxPathChars     = 2048
@@ -36,7 +39,8 @@ const (
 )
 
 var (
-	upstreamRe  = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+	serviceRe   = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+	kindRe      = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 	paramNameRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 	requestIDRe = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 	// An HTTP method is an RFC 9110 token.
@@ -60,7 +64,10 @@ func (v Invalid) err() error {
 type intentBody struct {
 	OccurredAt *string           `json:"occurred_at"`
 	Actor      *actorBody        `json:"actor"`
-	Upstream   *string           `json:"upstream"`
+	ActingAs   *actingAsBody     `json:"acting_as"`
+	RootID     *string           `json:"root_id"`
+	Nodes      *[]nodeBody       `json:"nodes"`
+	Service    *string           `json:"service"`
 	Method     *string           `json:"method"`
 	Route      *string           `json:"route"`
 	Params     map[string]string `json:"params"`
@@ -76,12 +83,22 @@ type actorBody struct {
 	ClientID   *string `json:"client_id"`
 }
 
+type actingAsBody struct {
+	MemberID  *string `json:"member_id"`
+	Principal *string `json:"principal"`
+}
+
+type nodeBody struct {
+	Kind *string `json:"kind"`
+	ID   *string `json:"id"`
+}
+
 type outcomeBody struct {
 	Outcome       *string         `json:"outcome"`
 	Status        *int            `json:"status"`
 	ResponseBytes *int64          `json:"response_bytes"`
-	Decision      json.RawMessage `json:"decision"`
 	Details       json.RawMessage `json:"details"`
+	CreatedID     *string         `json:"created_id"`
 }
 
 // decode unmarshals body into dst. A type error names its field. Unknown fields are
@@ -133,13 +150,13 @@ func ParseIntent(requestID string, body []byte, now time.Time) (*Intent, error) 
 		in.Method = *req.Method
 	}
 
-	// A matched request names its upstream and route. An unmatched one has only its path.
+	// A matched request names its service and route. An unmatched one has only its path.
 	switch {
 	case req.Route != nil && req.Path == nil:
-		if req.Upstream == nil || len(*req.Upstream) > maxUpstreamLen || !upstreamRe.MatchString(*req.Upstream) {
-			bad.add("upstream")
+		if req.Service == nil || len(*req.Service) > maxServiceLen || !serviceRe.MatchString(*req.Service) {
+			bad.add("service")
 		} else {
-			in.Upstream = req.Upstream
+			in.Service = req.Service
 		}
 		if r := *req.Route; r == "" || r[0] != '/' || len(r) > maxRouteLen || !storable(r) {
 			bad.add("route")
@@ -147,8 +164,8 @@ func ParseIntent(requestID string, body []byte, now time.Time) (*Intent, error) 
 			in.Route = req.Route
 		}
 	case req.Route == nil && req.Path != nil:
-		if req.Upstream != nil {
-			bad.add("upstream")
+		if req.Service != nil {
+			bad.add("service")
 		}
 		if p := *req.Path; p == "" || utf8.RuneCountInString(p) > maxPathChars || !storable(p) {
 			bad.add("path")
@@ -173,6 +190,40 @@ func ParseIntent(requestID string, body []byte, now time.Time) (*Intent, error) 
 			continue
 		}
 		in.Params[name] = value
+	}
+
+	// The chain, root first. Only a matched route has one, and its root is its head.
+	in.Nodes = []Node{}
+	switch {
+	case req.Nodes == nil, len(*req.Nodes) > maxNodes, len(*req.Nodes) > 0 && req.Route == nil:
+		bad.add("nodes")
+	default:
+		for i, n := range *req.Nodes {
+			if n.Kind == nil || !kindRe.MatchString(*n.Kind) || n.ID == nil || *n.ID == "" ||
+				len(*n.ID) > maxIDLen || !storable(*n.ID) {
+				bad.add("nodes." + strconv.Itoa(i))
+				continue
+			}
+			in.Nodes = append(in.Nodes, Node{Kind: *n.Kind, ID: *n.ID})
+		}
+	}
+	switch {
+	case len(in.Nodes) == 0 && req.RootID != nil, len(in.Nodes) > 0 && (req.RootID == nil || *req.RootID != in.Nodes[0].ID):
+		bad.add("root_id")
+	case len(in.Nodes) > 0:
+		in.RootID = req.RootID
+	}
+	if a := req.ActingAs; a != nil {
+		switch {
+		case len(in.Nodes) == 0:
+			bad.add("acting_as")
+		case a.MemberID == nil || *a.MemberID == "" || len(*a.MemberID) > maxIDLen || !storable(*a.MemberID):
+			bad.add("acting_as.member_id")
+		case a.Principal == nil || (*a.Principal != "person" && *a.Principal != "service_account"):
+			bad.add("acting_as.principal")
+		default:
+			in.ActingAs = &ActingAs{MemberID: *a.MemberID, Principal: *a.Principal}
+		}
 	}
 
 	in.IP = text(&bad, "ip", req.IP, maxIPLen)
@@ -229,11 +280,6 @@ func ParseOutcome(requestID string, body []byte) (*Outcome, error) {
 		out.ResponseBytes = *req.ResponseBytes
 	}
 
-	// Reserved for authz (slice 3).
-	if !isNull(req.Decision) {
-		bad.add("decision")
-	}
-
 	if !isNull(req.Details) {
 		details := bytes.TrimSpace(req.Details)
 		// Details come from the upstream response, so only a response has them.
@@ -246,10 +292,32 @@ func ParseOutcome(requestID string, body []byte) (*Outcome, error) {
 		}
 	}
 
+	if req.CreatedID != nil {
+		// Only a response names what it created.
+		if out.Outcome != OutcomeResponded || !validCreated(*req.CreatedID) {
+			bad.add("created_id")
+		} else {
+			out.CreatedID = req.CreatedID
+		}
+	}
+
 	if err := bad.err(); err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// validCreated is one id: visible ASCII, one path segment, within the cap.
+func validCreated(s string) bool {
+	if s == "" || len(s) > maxCreatedLen || s == "." || s == ".." {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] <= 0x20 || s[i] > 0x7e || s[i] == '/' || s[i] == '?' || s[i] == '#' {
+			return false
+		}
+	}
+	return true
 }
 
 var listOutcomes = map[string]bool{
@@ -257,7 +325,7 @@ var listOutcomes = map[string]bool{
 }
 
 // ParseFilter reads the list query. Unknown, repeated, or malformed params are invalid
-// (docs/audit.md#reading).
+// (docs/reference/api/operator-audit.md#reading).
 func ParseFilter(rawQuery string) (Filter, error) {
 	f := Filter{Limit: defaultListLimit}
 	q, err := url.ParseQuery(rawQuery)
@@ -301,12 +369,22 @@ func ParseFilter(rawQuery string) (Filter, error) {
 			f.StartingAfter = value
 		case "operator_id":
 			f.OperatorID = text(&bad, key, &value, maxActorLen)
-		case "upstream":
-			if !upstreamRe.MatchString(value) || len(value) > maxUpstreamLen {
+		case "acting_as_member_id":
+			f.ActingAsMember = text(&bad, key, &value, maxIDLen)
+		case "node_id":
+			f.NodeID = text(&bad, key, &value, maxIDLen)
+		case "created_id":
+			if !validCreated(value) {
 				bad.add(key)
 				continue
 			}
-			f.Upstream = value
+			f.CreatedID = value
+		case "service":
+			if !serviceRe.MatchString(value) || len(value) > maxServiceLen {
+				bad.add(key)
+				continue
+			}
+			f.Service = value
 		case "method":
 			if !methodRe.MatchString(value) {
 				bad.add(key)

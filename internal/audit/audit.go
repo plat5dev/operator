@@ -1,4 +1,4 @@
-// Package audit writes the staff audit log from the gateway. Contract: docs/audit.md.
+// Package audit writes the staff audit log from the gateway. Contract: docs/concepts/audit.md.
 // The intent is written before the gateway answers or forwards, and the client waits on it.
 // The outcome follows in the background. Audit is on or off for the whole deployment.
 package audit
@@ -23,11 +23,13 @@ import (
 	"github.com/plat5dev/operator/internal/metrics"
 )
 
-// DetailsHeader is where a service says what changed. The gateway stores it as sent and
-// strips it, from requests and responses, on every route.
-const DetailsHeader = "X-Plat5-Audit-Details"
-
+// Headers a service sets on its response for the audit log, as Plat5 defines them. The
+// gateway strips every X-Plat5-Audit-* header from responses, on every route.
 const (
+	HeaderPrefix      = "X-Plat5-Audit-"
+	DetailsHeader     = "X-Plat5-Audit-Details"
+	CreatedHeader     = "X-Plat5-Audit-Created"
+	MaxCreatedLen     = 128
 	MaxDetailsBytes   = 4096
 	MaxUserAgentChars = 512
 	MaxPathChars      = 2048
@@ -66,12 +68,27 @@ type Actor struct {
 	ClientID   *string `json:"client_id"`
 }
 
+// ActingAs is the member an /as/{member} request acted as, once the member passed the check.
+type ActingAs struct {
+	MemberID  string `json:"member_id"`
+	Principal string `json:"principal"`
+}
+
+// Node is one node of the route node's chain.
+type Node struct {
+	Kind string `json:"kind"`
+	ID   string `json:"id"`
+}
+
 // Intent is everything the gateway knows before it answers or forwards. RequestID is in the URL.
 type Intent struct {
 	RequestID  string            `json:"-"`
 	OccurredAt string            `json:"occurred_at"`
 	Actor      Actor             `json:"actor"`
-	Upstream   *string           `json:"upstream"`
+	ActingAs   *ActingAs         `json:"acting_as"`
+	RootID     *string           `json:"root_id"`
+	Nodes      []Node            `json:"nodes"`
+	Service    *string           `json:"service"`
 	Method     string            `json:"method"`
 	Route      *string           `json:"route"`
 	Params     map[string]string `json:"params"`
@@ -94,11 +111,10 @@ const (
 type Outcome struct {
 	Outcome OutcomeKind `json:"outcome"`
 	// Status is what the gateway answered with. Nil when the client was gone first.
-	Status        *int  `json:"status"`
-	ResponseBytes int64 `json:"response_bytes"`
-	// Decision is reserved for authz (slice 3). Always null.
-	Decision json.RawMessage `json:"decision"`
-	Details  json.RawMessage `json:"details"`
+	Status        *int            `json:"status"`
+	ResponseBytes int64           `json:"response_bytes"`
+	Details       json.RawMessage `json:"details"`
+	CreatedID     *string         `json:"created_id"`
 }
 
 // State is what the gateway learns about a request between its intent and its outcome.
@@ -108,6 +124,7 @@ type State struct {
 	// UpstreamStatus is set when the upstream answers.
 	UpstreamStatus int
 	Details        json.RawMessage
+	CreatedID      *string
 	// ClientGone means the client left before the gateway could answer.
 	ClientGone bool
 }
@@ -139,6 +156,7 @@ func OutcomeFor(s *State, written int, responseBytes int64) Outcome {
 		out.Outcome = Responded
 		out.Status = status(s.UpstreamStatus)
 		out.Details = s.Details
+		out.CreatedID = s.CreatedID
 	case s.Forwarded:
 		out.Outcome = NoResponse
 		if !s.ClientGone {
@@ -172,6 +190,24 @@ func ParseDetails(values []string) (details json.RawMessage, ok bool) {
 		return nil, false
 	}
 	return json.RawMessage(v), true
+}
+
+// ParseCreated is the created header as one id: visible ASCII, one path segment, within
+// the cap. ok is false when the header is there but unusable; the event then records null.
+func ParseCreated(values []string) (id *string, ok bool) {
+	if len(values) != 1 {
+		return nil, false
+	}
+	v := values[0]
+	if v == "" || len(v) > MaxCreatedLen || v == "." || v == ".." {
+		return nil, false
+	}
+	for i := 0; i < len(v); i++ {
+		if v[i] <= 0x20 || v[i] > 0x7e || v[i] == '/' || v[i] == '?' || v[i] == '#' {
+			return nil, false
+		}
+	}
+	return &v, true
 }
 
 // Text makes s storable: invalid UTF-8 and NUL become U+FFFD.

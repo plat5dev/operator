@@ -1,5 +1,5 @@
 // Package db is operator-audit's Postgres: connecting, migrating as the owner, and
-// checking that serve runs as the writer. Contract: docs/audit.md#storage.
+// checking that serve runs as the writer. Contract: docs/internals/audit-storage.md.
 package db
 
 import (
@@ -85,7 +85,7 @@ func LatestVersion() string {
 }
 
 // Migrate applies migrations as the schema owner, then grants writerRole exactly the
-// writer's rights (docs/audit.md#roles). Replicas serialize on an advisory lock.
+// writer's rights (docs/internals/audit-storage.md#roles). Replicas serialize on an advisory lock.
 func Migrate(ctx context.Context, pool *pgxpool.Pool, writerRole string) error {
 	if !roleRe.MatchString(writerRole) {
 		return fmt.Errorf("WRITER_ROLE %q is not a plain lowercase role name", writerRole)
@@ -164,7 +164,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, writerRole string) error {
 		"GRANT USAGE ON SCHEMA audit TO " + writer,
 		"GRANT SELECT ON audit.schema_migrations TO " + writer,
 		"GRANT SELECT, INSERT ON audit.audit_events TO " + writer,
-		"GRANT UPDATE (outcome, status, response_bytes, decision, details) ON audit.audit_events TO " + writer,
+		"GRANT UPDATE (outcome, status, response_bytes, details, created_id) ON audit.audit_events TO " + writer,
 		"GRANT EXECUTE ON FUNCTION audit.ensure_partition(timestamptz) TO " + writer,
 	}
 	return pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
@@ -198,6 +198,15 @@ func CheckWriter(ctx context.Context, pool *pgxpool.Pool) error {
 	if !applied {
 		return fmt.Errorf("migration %s is not applied; run operator-audit migrate first", LatestVersion())
 	}
+	// An earlier build's 001 has no chain. Its events can't be filled in: recreate the database.
+	var current bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns
+		WHERE table_schema = 'audit' AND table_name = 'audit_events' AND column_name = 'node_ids')`).Scan(&current); err != nil {
+		return err
+	}
+	if !current {
+		return errors.New("audit.audit_events was made by an earlier build's migration 001; recreate the database (docs/internals/audit-storage.md)")
+	}
 	var me string
 	var owns, canDelete, canTruncate, canInsert, canPartition bool
 	if err := pool.QueryRow(ctx, `
@@ -212,7 +221,7 @@ func CheckWriter(ctx context.Context, pool *pgxpool.Pool) error {
 		return err
 	}
 	if owns || canDelete || canTruncate {
-		return fmt.Errorf("%w: role %q can delete audit events; run serve as the writer role (docs/audit.md#roles)", ErrNotWriter, me)
+		return fmt.Errorf("%w: role %q can delete audit events; run serve as the writer role (docs/internals/audit-storage.md#roles)", ErrNotWriter, me)
 	}
 	if !canInsert || !canPartition {
 		return fmt.Errorf("%w: role %q cannot write audit events; run operator-audit migrate with WRITER_ROLE=%s", ErrNotWriter, me, me)

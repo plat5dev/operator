@@ -1,5 +1,5 @@
-// Package gateway is the operator front door: authenticate, match, audit, strip, forward, log.
-// Contract: docs/model.md, docs/audit.md.
+// Package gateway is the operator front door: authenticate, match, resolve, audit, strip,
+// forward, log. Contract: docs/concepts/requests.md, docs/concepts/audit.md.
 package gateway
 
 import (
@@ -11,12 +11,14 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/plat5dev/operator/internal/apierr"
 	"github.com/plat5dev/operator/internal/audit"
 	"github.com/plat5dev/operator/internal/auth"
+	"github.com/plat5dev/operator/internal/identity"
 	"github.com/plat5dev/operator/internal/metrics"
 	"github.com/plat5dev/operator/internal/routes"
 )
@@ -26,6 +28,13 @@ type Authenticator interface {
 	Verify(ctx context.Context, header string) (*auth.Operator, error)
 }
 
+// Identity is Plat5 identity: a node's chain, and a member in a tree. *identity.Client is
+// the real one. Errors are the identity package's.
+type Identity interface {
+	Chain(ctx context.Context, nodeID, requestID string) ([]identity.Node, error)
+	Member(ctx context.Context, rootID, memberID, requestID string) (principal string, err error)
+}
+
 // AuditWriter records the staff audit log. *audit.Writer is the real one.
 type AuditWriter interface {
 	WriteIntent(ctx context.Context, in *audit.Intent) error
@@ -33,8 +42,10 @@ type AuditWriter interface {
 }
 
 type Config struct {
-	Routes          *routes.Table
-	Auth            Authenticator
+	Routes *routes.Table
+	Auth   Authenticator
+	// Identity is required when a route names a node.
+	Identity        Identity
 	AllowedOrigins  []string
 	UpstreamTimeout time.Duration
 	// Audit is nil when audit is off.
@@ -46,6 +57,7 @@ type Config struct {
 type Gateway struct {
 	routes          *routes.Table
 	auth            Authenticator
+	identity        Identity
 	audit           AuditWriter
 	origins         map[string]bool
 	proxies         map[*routes.Route]*httputil.ReverseProxy
@@ -53,25 +65,40 @@ type Gateway struct {
 	log             *slog.Logger
 }
 
-// Credentials the upstream never sees.
-var stripped = []string{"Authorization", "Cookie", "X-API-Key"}
-
 const (
+	plat5Prefix      = "X-Plat5-"
+	operatorHeader   = "X-Plat5-Operator-Id"
+	memberHeader     = "X-Plat5-Member-Id"
+	principalHeader  = "X-Plat5-Principal"
 	preflightMethods = "GET, HEAD, POST, PUT, PATCH, DELETE"
 	preflightHeaders = "Authorization, Content-Type, X-Request-ID, traceparent"
 )
 
+// Credentials the upstream never sees. Every incoming X-Plat5-* header goes too.
+var stripped = []string{"Authorization", "Cookie", "X-API-Key"}
+
+// Set on every API response, as Plat5's gateway sets them.
+var securityHeaders = map[string]string{
+	"X-Content-Type-Options": "nosniff",
+	"X-Frame-Options":        "DENY",
+	"Referrer-Policy":        "strict-origin-when-cross-origin",
+}
+
 func New(cfg Config) *Gateway {
+	if cfg.Routes.HasNodes() && cfg.Identity == nil {
+		panic("gateway: routes name nodes but there is no identity client")
+	}
 	reg := cfg.Metrics
 	if reg == nil {
 		reg = metrics.NewRegistry()
 	}
 	g := &Gateway{
-		routes:  cfg.Routes,
-		auth:    cfg.Auth,
-		audit:   cfg.Audit,
-		origins: map[string]bool{},
-		proxies: map[*routes.Route]*httputil.ReverseProxy{},
+		routes:   cfg.Routes,
+		auth:     cfg.Auth,
+		identity: cfg.Identity,
+		audit:    cfg.Audit,
+		origins:  map[string]bool{},
+		proxies:  map[*routes.Route]*httputil.ReverseProxy{},
 		unauthenticated: reg.Counter("operator_unauthenticated_total",
 			"Requests answered 401, by reason. They are not audit events.", "reason"),
 		log: cfg.Log,
@@ -94,38 +121,79 @@ func New(cfg Config) *Gateway {
 	return g
 }
 
+// forward is what the proxy sends beside the path. The proxy hooks see only the request.
+type forward struct {
+	operatorID string
+	chain      []identity.Node
+	// member and principal are set when acting as a member.
+	member, principal string
+	// path is the escaped path to send: the request's, without /as/{member}.
+	path string
+}
+
+type forwardKey struct{}
+
 func (g *Gateway) proxy(route *routes.Route, transport http.RoundTripper) *httputil.ReverseProxy {
 	target := route.Target()
 	return &httputil.ReverseProxy{
 		Transport: transport,
 		Rewrite: func(pr *httputil.ProxyRequest) {
+			f := pr.In.Context().Value(forwardKey{}).(*forward)
 			// SetURL keeps the escaped request path and query exactly as received.
 			pr.SetURL(target)
-			for _, h := range stripped {
-				pr.Out.Header.Del(h)
+			if f.path != pr.In.URL.EscapedPath() {
+				pr.Out.URL.RawPath = f.path
+				pr.Out.URL.Path, _ = url.PathUnescape(f.path)
 			}
-			// Only a service sets audit details, on its response. Never pass a client's on.
-			pr.Out.Header.Del(audit.DetailsHeader)
-			pr.Out.Header.Set("X-Request-ID", apierr.RequestID(pr.In.Context()))
+			h := pr.Out.Header
+			for _, k := range stripped {
+				h.Del(k)
+			}
+			// A client can't name a node, a member or an operator.
+			for k := range h {
+				if strings.HasPrefix(k, plat5Prefix) {
+					h.Del(k)
+				}
+			}
+			h.Set("X-Request-ID", apierr.RequestID(pr.In.Context()))
+			h.Set(operatorHeader, f.operatorID)
+			for _, n := range f.chain {
+				h.Set(kindHeader(n.Kind), n.ID)
+			}
+			if f.member != "" {
+				h.Set(memberHeader, f.member)
+				h.Set(principalHeader, f.principal)
+			}
 		},
 		ModifyResponse: func(res *http.Response) error {
-			// This gateway owns the request id and CORS.
+			// This gateway owns the request id, CORS and the security headers.
 			res.Header.Del("X-Request-ID")
+			for k := range securityHeaders {
+				res.Header.Del(k)
+			}
+			details := res.Header.Values(audit.DetailsHeader)
+			created := res.Header.Values(audit.CreatedHeader)
+			// What the service tells the audit log never reaches the client, audit on or off.
 			for k := range res.Header {
-				if strings.HasPrefix(k, "Access-Control-") {
+				if strings.HasPrefix(k, "Access-Control-") || strings.HasPrefix(k, audit.HeaderPrefix) {
 					res.Header.Del(k)
 				}
 			}
-			// The service's audit details never reach the client, audit on or off.
-			details := res.Header.Values(audit.DetailsHeader)
-			res.Header.Del(audit.DetailsHeader)
 			if st := audit.StateFrom(res.Request.Context()); st != nil {
 				st.UpstreamStatus = res.StatusCode
+				id := apierr.RequestID(res.Request.Context())
 				if len(details) > 0 {
 					var ok bool
 					if st.Details, ok = audit.ParseDetails(details); !ok {
 						g.log.Warn("ignoring audit details that are not one ASCII JSON object within 4096 bytes",
-							"request_id", apierr.RequestID(res.Request.Context()), "upstream", route.Upstream())
+							"request_id", id, "service", route.Service())
+					}
+				}
+				if len(created) > 0 {
+					var ok bool
+					if st.CreatedID, ok = audit.ParseCreated(created); !ok {
+						g.log.Warn("ignoring an audit created id that is not one path segment of ASCII within 128 bytes",
+							"request_id", id, "service", route.Service())
 					}
 				}
 			}
@@ -135,10 +203,47 @@ func (g *Gateway) proxy(route *routes.Route, transport http.RoundTripper) *httpu
 			if st := audit.StateFrom(r.Context()); st != nil && r.Context().Err() != nil {
 				st.ClientGone = true
 			}
-			g.log.Warn("upstream failed", "request_id", apierr.RequestID(r.Context()), "upstream", route.Upstream(), "err", err)
-			apierr.Unavailable(w, r)
+			g.log.Warn("upstream failed", "request_id", apierr.RequestID(r.Context()), "service", route.Service(), "err", err)
+			apierr.BadGateway(w, r)
 		},
 	}
+}
+
+// kindHeader is X-Plat5-<Kind>-Id, as Plat5 names it: project → X-Plat5-Project-Id,
+// cost_center → X-Plat5-Cost-Center-Id.
+func kindHeader(kind string) string {
+	return http.CanonicalHeaderKey(plat5Prefix + strings.ReplaceAll(kind, "_", "-") + "-Id")
+}
+
+// resolved is what identity said about a matched request.
+type resolved struct {
+	chain []identity.Node
+	// principal is set once the member passed the check.
+	principal string
+	err       error
+}
+
+// found is the chain when identity answered for it, else nil.
+func (r resolved) found() []identity.Node {
+	if errors.Is(r.err, identity.ErrUnavailable) {
+		return nil
+	}
+	return r.chain
+}
+
+// resolve looks up the route node's chain and, acting as a member, the member in the
+// chain's root. It answers nothing: the intent is written first.
+func (g *Gateway) resolve(ctx context.Context, id string, m *routes.Match) resolved {
+	var res resolved
+	if m == nil || m.Route.Node == "" {
+		return res
+	}
+	res.chain, res.err = g.identity.Chain(ctx, m.NodeID(), id)
+	if res.err != nil || m.Member == "" {
+		return res
+	}
+	res.principal, res.err = g.identity.Member(ctx, res.chain[0].ID, m.Member, id)
+	return res
 }
 
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -151,6 +256,9 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h := w.Header()
 	h.Set("X-Request-ID", id)
+	for k, v := range securityHeaders {
+		h.Set(k, v)
+	}
 	if len(g.origins) > 0 {
 		h.Add("Vary", "Origin")
 	}
@@ -162,10 +270,10 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var (
-		op     *auth.Operator
-		route  *routes.Route
-		params map[string]string
-		state  *audit.State
+		op    *auth.Operator
+		match *routes.Match
+		res   resolved
+		state *audit.State
 	)
 	defer func() {
 		rv := recover()
@@ -178,7 +286,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if state != nil {
 			g.audit.SendOutcome(id, audit.OutcomeFor(state, rec.status, rec.bytes))
 		}
-		g.logRequest(r, id, op, route, params, rec.status, time.Since(start))
+		g.logRequest(r, id, op, match, res, rec.status, time.Since(start))
 		if rv == http.ErrAbortHandler {
 			panic(rv)
 		}
@@ -213,34 +321,67 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 3. Check the path and match a route. Nothing is answered yet.
 	segs, pathErr := routes.Segments(r.URL.EscapedPath())
 	if pathErr == nil {
-		route, params = g.routes.Match(r.Method, segs)
+		match = g.routes.Match(r.Method, segs)
 	}
 
-	// 4. Nothing past authentication answers until the audit intent is written.
+	// 4. The route node's chain, and the member when acting as one. Nothing is answered yet.
+	res = g.resolve(r.Context(), id, match)
+
+	// 5. Nothing past authentication answers until the audit intent is written.
 	if g.audit != nil {
 		state = &audit.State{}
 		r = r.WithContext(audit.WithState(r.Context(), state))
-		if err := g.audit.WriteIntent(r.Context(), intent(r, id, start, op, route, params)); err != nil {
+		if err := g.audit.WriteIntent(r.Context(), intent(r, id, start, op, match, res)); err != nil {
 			apierr.Unavailable(w, r)
 			return
 		}
 	}
 
-	// 5. Refuse paths the service could read differently, then unrouted requests.
-	if pathErr != nil {
+	// 6. Answer what can't be forwarded.
+	switch {
+	case pathErr != nil:
 		apierr.InvalidRequest(w, r)
 		return
-	}
-	if route == nil {
+	case match == nil:
 		apierr.NotFound(w, r)
+		return
+	case errors.Is(res.err, identity.ErrNotFound):
+		apierr.NotFoundResource(w, r, "node", match.NodeID())
+		return
+	case errors.Is(res.err, identity.ErrNotActive):
+		apierr.InvalidRequest(w, r)
+		return
+	case res.err != nil:
+		g.log.Error("identity unavailable", "request_id", id, "err", res.err)
+		apierr.Unavailable(w, r)
 		return
 	}
 
-	// 7. Forward. Authz, before it, is slice 3.
+	// 7. Forward.
+	f := &forward{operatorID: op.ID, chain: res.chain, path: r.URL.EscapedPath()}
+	if match.Member != "" {
+		f.member, f.principal = match.Member, res.principal
+		f.path = stripAs(f.path)
+	}
+	r = r.WithContext(context.WithValue(r.Context(), forwardKey{}, f))
 	if state != nil {
 		state.Forwarded = true
 	}
-	g.proxies[route].ServeHTTP(w, r)
+	g.proxies[match.Route].ServeHTTP(w, r)
+}
+
+// stripAs drops the /as/{member} prefix from an escaped path that has one.
+func stripAs(escaped string) string {
+	// "/as/{member}/rest": the third slash starts the rest.
+	n := 0
+	for i := 0; i < len(escaped); i++ {
+		if escaped[i] == '/' {
+			if n++; n == 3 {
+				return escaped[i:]
+			}
+		}
+	}
+	return escaped
 }
 
 func (g *Gateway) unauthorized(w http.ResponseWriter, r *http.Request, reason string) {
@@ -249,7 +390,7 @@ func (g *Gateway) unauthorized(w http.ResponseWriter, r *http.Request, reason st
 }
 
 // intent is everything known about the request before it is answered or forwarded.
-func intent(r *http.Request, id string, at time.Time, op *auth.Operator, route *routes.Route, params map[string]string) *audit.Intent {
+func intent(r *http.Request, id string, at time.Time, op *auth.Operator, m *routes.Match, res resolved) *audit.Intent {
 	in := &audit.Intent{
 		RequestID:  id,
 		OccurredAt: audit.Timestamp(at),
@@ -259,20 +400,31 @@ func intent(r *http.Request, id string, at time.Time, op *auth.Operator, route *
 			Email:      optional(op.Email),
 			ClientID:   optional(op.ClientID),
 		},
+		Nodes:     []audit.Node{},
 		Method:    r.Method,
 		Params:    map[string]string{},
 		IP:        audit.ClientIP(r.RemoteAddr),
 		UserAgent: audit.UserAgent(r.UserAgent()),
 	}
-	if route == nil {
+	if m == nil {
 		path := audit.Path(r.URL.EscapedPath())
 		in.Path = &path
 		return in
 	}
-	upstream, template := route.Upstream(), route.Path
-	in.Upstream, in.Route = &upstream, &template
-	for k, v := range params {
+	service, template := m.Route.Service(), m.Template()
+	in.Service, in.Route = &service, &template
+	for k, v := range m.Params {
 		in.Params[k] = audit.Text(v)
+	}
+	if chain := res.found(); len(chain) > 0 {
+		for _, n := range chain {
+			in.Nodes = append(in.Nodes, audit.Node{Kind: n.Kind, ID: n.ID})
+		}
+		root := chain[0].ID
+		in.RootID = &root
+	}
+	if res.principal != "" {
+		in.ActingAs = &audit.ActingAs{MemberID: m.Member, Principal: res.principal}
 	}
 	return in
 }
@@ -285,7 +437,7 @@ func optional(s string) *string {
 	return &s
 }
 
-func (g *Gateway) logRequest(r *http.Request, id string, op *auth.Operator, route *routes.Route, params map[string]string, status int, d time.Duration) {
+func (g *Gateway) logRequest(r *http.Request, id string, op *auth.Operator, m *routes.Match, res resolved, status int, d time.Duration) {
 	attrs := []any{
 		"request_id", id,
 		"method", r.Method,
@@ -298,10 +450,16 @@ func (g *Gateway) logRequest(r *http.Request, id string, op *auth.Operator, rout
 			attrs = append(attrs, "operator_email", op.Email)
 		}
 	}
-	if route != nil {
-		attrs = append(attrs, "route", route.Path)
-		if len(params) > 0 {
-			attrs = append(attrs, "params", params)
+	if m != nil {
+		attrs = append(attrs, "service", m.Route.Service(), "route", m.Template())
+		if len(m.Params) > 0 {
+			attrs = append(attrs, "params", m.Params)
+		}
+		if chain := res.found(); len(chain) > 0 {
+			attrs = append(attrs, "root_id", chain[0].ID, "node_id", chain[len(chain)-1].ID)
+		}
+		if res.principal != "" {
+			attrs = append(attrs, "member_id", m.Member)
 		}
 	}
 	g.log.Info("request", attrs...)

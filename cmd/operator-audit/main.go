@@ -1,5 +1,5 @@
 // Command operator-audit stores the staff audit log and serves it back through the gateway.
-// Contract: docs/audit.md.
+// Contract: docs/reference/api/operator-audit.md.
 //
 //	operator-audit migrate   as the schema owner: migrations, then the writer's grants
 //	operator-audit serve     as the writer: the internal write API and the read route
@@ -71,7 +71,7 @@ func run(cmd string, log *slog.Logger) error {
 }
 
 func serve(ctx context.Context, cfg config, pool *pgxpool.Pool, log *slog.Logger) error {
-	// The role that serves can change no history (docs/audit.md#roles).
+	// The role that serves can change no history (docs/internals/audit-storage.md#roles).
 	if err := db.CheckWriter(ctx, pool); err != nil {
 		return err
 	}

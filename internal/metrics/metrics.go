@@ -1,5 +1,5 @@
 // Package metrics serves counters, gauges, and histograms in Prometheus text format.
-// This repo reports a handful of series (docs/audit.md#metrics), not enough to need a client library.
+// This repo reports a handful of series (docs/reference/gateway.md#metrics), not enough to need a client library.
 package metrics
 
 import (
