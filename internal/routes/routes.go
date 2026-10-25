@@ -22,17 +22,76 @@ type Service struct {
 }
 
 type Route struct {
-	Path    string   `yaml:"path"`
-	Methods []string `yaml:"methods"`
+	Path    string  `yaml:"path"`
+	Methods Methods `yaml:"methods"`
 	// Node is the param holding the Plat5 node id the route addresses, or "".
 	Node string `yaml:"node"`
-	// AsMember also serves the route at /as/{member} + Path.
+	// AsMember also serves the route's verbs at /as/{member} + Path. A verb's own
+	// as_member overrides it.
 	AsMember bool `yaml:"as_member"`
 
 	segments []segment
-	methods  map[string]bool
-	service  string
-	target   *url.URL
+	// verbs are the route's methods, each with whether it is served at /as/{member}.
+	verbs   map[string]bool
+	service string
+	target  *url.URL
+}
+
+// Methods are a route's verbs: a list, or a map of verb to null or its settings. A list
+// is a map with no overrides.
+type Methods []Method
+
+// Method is one verb and its settings.
+type Method struct {
+	Verb string
+	// AsMember overrides the route's as_member, or is nil.
+	AsMember *bool
+}
+
+func (ms *Methods) UnmarshalYAML(n *yaml.Node) error {
+	switch n.Kind {
+	case yaml.SequenceNode:
+		var verbs []string
+		if err := n.Decode(&verbs); err != nil {
+			return err
+		}
+		for _, v := range verbs {
+			*ms = append(*ms, Method{Verb: v})
+		}
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			k, v := n.Content[i], n.Content[i+1]
+			if k.Kind != yaml.ScalarNode {
+				return fmt.Errorf("line %d: a method is a verb", k.Line)
+			}
+			m := Method{Verb: k.Value}
+			switch {
+			case v.Tag == "!!null":
+			case v.Kind == yaml.MappingNode:
+				// The only setting is as_member. Anything else refuses boot.
+				for j := 0; j+1 < len(v.Content); j += 2 {
+					f := v.Content[j]
+					if f.Value != "as_member" {
+						return fmt.Errorf("line %d: field %s not allowed in %s's settings", f.Line, f.Value, m.Verb)
+					}
+					if m.AsMember != nil {
+						return fmt.Errorf("line %d: as_member repeated in %s's settings", f.Line, m.Verb)
+					}
+					var b bool
+					if err := v.Content[j+1].Decode(&b); err != nil {
+						return err
+					}
+					m.AsMember = &b
+				}
+			default:
+				return fmt.Errorf("line %d: %s's settings must be null or a map", v.Line, m.Verb)
+			}
+			*ms = append(*ms, m)
+		}
+	default:
+		return fmt.Errorf("line %d: methods must be a list or a map", n.Line)
+	}
+	return nil
 }
 
 // Service is the name of the service this route belongs to.
@@ -74,7 +133,9 @@ const (
 var (
 	nameRe  = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 	paramRe = regexp.MustCompile(`^\{([a-z][a-z0-9_]*)\}$`)
-	allowed = map[string]bool{"GET": true, "HEAD": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true}
+	// {project.id}: in Plat5, a value its gateway fills in.
+	dottedRe = regexp.MustCompile(`^\{[^{}]*\.[^{}]*\}$`)
+	allowed  = map[string]bool{"GET": true, "HEAD": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true}
 )
 
 func Load(path string) (*Table, error) {
@@ -164,6 +225,9 @@ func (r *Route) compile() error {
 		if i == 0 && s == asPrefix {
 			return errors.New("/as/ is reserved for acting as a member")
 		}
+		if dottedRe.MatchString(s) {
+			return fmt.Errorf("parameter %s has a dot: params are bare, and this gateway fills nothing in", s)
+		}
 		if m := paramRe.FindStringSubmatch(s); m != nil {
 			if m[1] == memberParam {
 				return errors.New("parameter member is reserved for /as/{member}")
@@ -181,25 +245,29 @@ func (r *Route) compile() error {
 		r.segments = append(r.segments, segment{literal: s})
 	}
 
-	if len(r.Methods) == 0 {
-		return errors.New("methods: missing")
-	}
-	r.methods = map[string]bool{}
-	for _, m := range r.Methods {
-		if !allowed[m] {
-			return fmt.Errorf("method %q not allowed", m)
-		}
-		if r.methods[m] {
-			return fmt.Errorf("method %s repeated", m)
-		}
-		r.methods[m] = true
-	}
-
 	if r.Node != "" && !seen[r.Node] {
 		return fmt.Errorf("node %q is not a path parameter", r.Node)
 	}
-	if r.AsMember && r.Node == "" {
-		return errors.New("as_member needs node: the member is checked in the node's tree")
+
+	if len(r.Methods) == 0 {
+		return errors.New("methods: missing")
+	}
+	r.verbs = map[string]bool{}
+	for _, m := range r.Methods {
+		if !allowed[m.Verb] {
+			return fmt.Errorf("method %q not allowed", m.Verb)
+		}
+		if _, dup := r.verbs[m.Verb]; dup {
+			return fmt.Errorf("method %s repeated", m.Verb)
+		}
+		as := r.AsMember
+		if m.AsMember != nil {
+			as = *m.AsMember
+		}
+		if as && r.Node == "" {
+			return fmt.Errorf("%s: as_member needs node: the member is checked in the node's tree", m.Verb)
+		}
+		r.verbs[m.Verb] = as
 	}
 	return nil
 }
@@ -209,8 +277,8 @@ func overlaps(a, b *Route) bool {
 		return false
 	}
 	shared := false
-	for m := range a.methods {
-		if b.methods[m] {
+	for m := range a.verbs {
+		if _, ok := b.verbs[m]; ok {
 			shared = true
 			break
 		}
@@ -253,14 +321,15 @@ func (m *Match) NodeID() string {
 }
 
 // Match returns the route for this method and decoded path segments, or nil. A path
-// starting /as/{member}/ matches only routes with as_member, against the rest.
+// starting /as/{member}/ matches only a route whose verb has as_member, against the rest.
 func (t *Table) Match(method string, segs []string) *Match {
 	member := ""
 	if len(segs) > 2 && segs[0] == asPrefix {
 		member, segs = segs[1], segs[2:]
 	}
 	for _, r := range t.routes {
-		if len(r.segments) != len(segs) || !r.methods[method] || (member != "" && !r.AsMember) {
+		as, listed := r.verbs[method]
+		if len(r.segments) != len(segs) || !listed || (member != "" && !as) {
 			continue
 		}
 		params := map[string]string{}

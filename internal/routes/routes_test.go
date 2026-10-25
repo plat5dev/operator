@@ -100,6 +100,17 @@ func TestParseErrors(t *testing.T) {
 		"node not a param":        one("      - path: /a/{id}\n        node: other\n        methods: [GET]\n"),
 		"node a literal":          one("      - path: /a/{id}\n        node: a\n        methods: [GET]\n"),
 		"as_member without node":  one("      - path: /a/{id}\n        as_member: true\n        methods: [GET]\n"),
+		"verb as_member, no node": one("      - path: /a/{id}\n        methods:\n          POST: { as_member: true }\n"),
+		"dotted param":            one("      - path: /projects/{project.id}\n        methods: [GET]\n"),
+		"methods a scalar":        one("      - path: /a\n        methods: GET\n"),
+		"methods an empty map":    one("      - path: /a\n        methods: {}\n"),
+		"verb settings a list":    one("      - path: /a\n        methods:\n          GET: [as_member]\n"),
+		"verb settings a scalar":  one("      - path: /a\n        methods:\n          GET: true\n"),
+		"unknown verb setting":    one("      - path: /a/{id}\n        node: id\n        methods:\n          GET: { audit: false }\n"),
+		"verb setting repeated":   one("      - path: /a/{id}\n        node: id\n        methods:\n          GET: { as_member: true, as_member: false }\n"),
+		"verb as_member not bool": one("      - path: /a/{id}\n        node: id\n        methods:\n          GET: { as_member: yes please }\n"),
+		"lowercase verb in a map": one("      - path: /a\n        methods:\n          get:\n"),
+		"verb repeated in a map":  one("      - path: /a\n        methods:\n          GET:\n          GET:\n"),
 		"literal vs param":        one("      - path: /a/new\n        methods: [GET]\n      - path: /a/{id}\n        methods: [GET, POST]\n"),
 		"duplicate route":         one("      - path: /a\n        methods: [GET]\n      - path: /a\n        methods: [GET]\n"),
 		"overlap across services": "services:\n  x:\n    url: http://x\n    routes:\n      - path: /a/{x}\n        methods: [GET]\n  y:\n    url: http://y\n    routes:\n      - path: /a/{y}\n        methods: [GET]\n",
@@ -110,6 +121,40 @@ func TestParseErrors(t *testing.T) {
 				t.Fatal("want error")
 			}
 		})
+	}
+}
+
+// A verb's settings override the route's: one path, a verb served as a member beside one that isn't.
+func TestMethodsMap(t *testing.T) {
+	tab, err := Parse([]byte(one(`      - path: /projects/{project_id}/plans
+        node: project_id
+        methods:
+          GET:
+          POST: { as_member: true }
+      - path: /projects/{project_id}/plans/{plan_id}
+        node: project_id
+        as_member: true
+        methods:
+          GET: { as_member: false }
+          PATCH: {}
+          DELETE:
+`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans, plan := "/projects/"+nodeID+"/plans", "/projects/"+nodeID+"/plans/pro"
+	as := "/as/" + memberID
+	for _, c := range []struct {
+		method, path string
+		want         bool
+	}{
+		{"GET", plans, true}, {"POST", plans, true}, {"POST", as + plans, true}, {"GET", as + plans, false},
+		{"GET", plan, true}, {"GET", as + plan, false}, {"PATCH", as + plan, true}, {"DELETE", as + plan, true},
+		{"PUT", plan, false},
+	} {
+		if got := match(t, tab, c.method, c.path) != nil; got != c.want {
+			t.Errorf("%s %s: matched %v, want %v", c.method, c.path, got, c.want)
+		}
 	}
 }
 
@@ -127,7 +172,7 @@ func TestShippedFiles(t *testing.T) {
 	dev := load(t, "../../compose/routes.yml")
 
 	key := func(r *Route) string {
-		return fmt.Sprintf("%s %s %v node=%s as_member=%v %s", r.Service(), r.Path, r.Methods, r.Node, r.AsMember, r.Target())
+		return fmt.Sprintf("%s %s %v node=%s %s", r.Service(), r.Path, r.verbs, r.Node, r.Target())
 	}
 	want := map[string]bool{}
 	for _, r := range shipped.Routes() {

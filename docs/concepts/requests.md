@@ -47,7 +47,7 @@ POST /as/01jbyb0d…/nodes/01jbx9q3…/children/project
   X-Plat5-Operator-Id: 00u1abc
 ```
 
-- **Only on routes that allow it.** A route with `as_member: true` is also served at `/as/{member}` followed by its path. This gateway strips the prefix and forwards the rest exactly. Without `/as/`, the same route is forwarded with no member.
+- **Only on routes that allow it.** A verb with `as_member: true`, its own or its route's, is also served at `/as/{member}` followed by the route's path. This gateway strips the prefix and forwards the rest exactly. Without `/as/`, the same route is forwarded with no member.
 - **The member must be active in the node's tree.** Identity's member lookup in the chain's root must answer `status: active`. Anything else is **400**: a removed member, a member of another tree, an id that isn't a member. Suspension is per person in Plat5 and isn't checked here, as identity doesn't check it on a member id it is sent.
 - **The service is told the member and its principal.** `X-Plat5-Member-Id`, and `X-Plat5-Principal` as identity names the member's principal: `person` or `service_account`.
 - **Access is the operator's, never the member's.** The member's bindings and labels are never read or applied. A filtered list asked as a member shows what that member can read.

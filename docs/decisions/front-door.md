@@ -9,6 +9,8 @@ Why the operator plane is its own gateway, why it addresses nodes by id with its
 | Staff reach services through their own gateway, never through Plat5's | Services do no auth, so any front door can call them (Plat5 principle 6). Plat5 keeps operator headers, roles and rules out of its own code (Plat5 `concepts/boundaries.md`), so a staff path through its gateway would need exactly those |
 | This gateway serves no UI and stores no accounts or sessions | A console is a client like a script or a CLI. Staff identity is the staff IdP's ([staff identity](staff-identity.md)) |
 | Its own route list, copied from each service's API, not read from Plat5's control plane | Plat5's routes describe the customer edge: slugs, scopes and labels. Staff call the services' own paths. A shared source is deferred until a hand copy causes a real mismatch ([`TODO.md`](../../TODO.md)) |
+| A route's `methods` is a list or a map of verb to settings, as Plat5's, with `as_member` the one setting | One shape for routes in both front doors' files. A path's verbs can differ: a write authored as a member beside a read that needs none |
+| Params are bare; nothing in the path is filled in | This gateway forwards the service's own path. A dotted placeholder is a value Plat5's gateway resolves, and nothing here resolves one |
 | Node ids in the path, never slugs | Identity's API addresses everything by id so any front door can call it without slugs (Plat5 `decisions/tree-and-kinds.md`). An operator works from ids in tickets, logs and audit events |
 | Authentication before route matching; **404** only to an authenticated caller | Plat5's gateway answers **404** first because its edge routes are public knowledge. This route list names internal service paths, which a stranger shouldn't learn |
 | Paths this gateway could read differently from the service are **400** | The matched path is the path the service sees, so the match must mean what the service will read |
@@ -32,7 +34,7 @@ Plat5 sends services the caller's member id because "authorship needs the caller
 
 | Decision | Why |
 |----------|-----|
-| A member id reaches a service only through `/as/{member}`, on a route with `as_member: true` | Authored records must name a real member of the tree (Plat5 `concepts/model.md#where-a-field-goes`). Putting it in the path makes it visible in the route, the log and the audit event, never implied by a header a client could forge |
+| A member id reaches a service only through `/as/{member}`, on a verb with `as_member: true` | Authored records must name a real member of the tree (Plat5 `concepts/model.md#where-a-field-goes`). Putting it in the path makes it visible in the route, the log and the audit event, never implied by a header a client could forge |
 | The member must be active in the route node's tree, checked against identity on every request | Plat5's closed world: a tree's data names only its own members. Identity refuses a member from another tree with **400** too; checking here keeps the refusal at the front door for services that don't check |
 | The member's bindings and labels are never applied | Access is the front door's decision, and here it's the operator's. Narrowing operators belongs to a decision service, not to whichever member they pick |
 | Suspension isn't checked | Plat5 suspends a person, not a member, and identity accepts a suspended person's member id. Staff may need to act for a suspended person, for example to clean up |
