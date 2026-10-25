@@ -55,7 +55,7 @@ func (f *fakeAudit) last() (*http.Request, string) {
 
 func writer(t *testing.T, url string) (*Writer, *metrics.Registry) {
 	reg := metrics.NewRegistry()
-	w := New(Config{URL: url + "/", Token: "tok", Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Metrics: reg})
+	w := New(Config{URL: url + "/", Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Metrics: reg})
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -92,7 +92,7 @@ func TestIntentWire(t *testing.T) {
 	if r.Method != "PUT" || r.URL.Path != "/internal/events/req1" {
 		t.Fatalf("%s %s", r.Method, r.URL.Path)
 	}
-	if r.Header.Get("Authorization") != "Bearer tok" || r.Header.Get("X-Request-ID") != "req1" {
+	if r.Header.Get("X-Request-ID") != "req1" {
 		t.Fatalf("headers %v", r.Header)
 	}
 	var m map[string]any

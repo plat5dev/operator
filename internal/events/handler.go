@@ -2,7 +2,6 @@ package events
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -32,32 +31,16 @@ func NewHandler(s store, log *slog.Logger) *Handler {
 	return &Handler{store: s, now: time.Now, log: log}
 }
 
-// MountInternal registers the gateway's writes. Every call needs the bearer token.
-func (h *Handler) MountInternal(mux *http.ServeMux, token string) {
-	mux.Handle("PUT /internal/events/{request_id}", requireToken(token, http.HandlerFunc(h.PutIntent)))
-	mux.Handle("PATCH /internal/events/{request_id}", requireToken(token, http.HandlerFunc(h.PatchOutcome)))
+// MountInternal registers the gateway's writes, on the internal port: only the
+// deployment's network reaches it.
+func (h *Handler) MountInternal(mux *http.ServeMux) {
+	mux.HandleFunc("PUT /internal/events/{request_id}", h.PutIntent)
+	mux.HandleFunc("PATCH /internal/events/{request_id}", h.PatchOutcome)
 }
 
 // MountPublic registers the operator log read. The gateway publishes it as a route.
 func (h *Handler) MountPublic(mux *http.ServeMux) {
 	mux.HandleFunc("GET /operator-audit-events", h.List)
-}
-
-// requireToken admits the gateway alone: only it writes the operator log.
-func requireToken(token string, next http.Handler) http.Handler {
-	want := []byte("Bearer " + token)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got := r.Header.Get("Authorization")
-		if got == "" {
-			apierr.Unauthorized(w, r, "missing")
-			return
-		}
-		if subtle.ConstantTimeCompare([]byte(got), want) != 1 {
-			apierr.Unauthorized(w, r, "invalid")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 // PutIntent creates the pending event, or leaves an existing one alone.

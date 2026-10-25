@@ -24,8 +24,7 @@ type config struct {
 	AllowedOrigins  []string
 	UpstreamTimeout time.Duration
 	// AuditURL is operator-audit's internal base URL. Empty when audit is off.
-	AuditURL   string
-	AuditToken string
+	AuditURL string
 }
 
 func loadConfig(getenv func(string) string) (config, error) {
@@ -86,10 +85,6 @@ func loadConfig(getenv func(string) string) (config, error) {
 		if u, err := url.Parse(c.AuditURL); c.AuditURL == "" || err != nil || (u.Scheme != "http" && u.Scheme != "https") ||
 			u.Host == "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
 			errs = append(errs, errors.New("AUDIT_URL must be an http or https URL unless AUDIT_ENABLED=false"))
-		}
-		c.AuditToken = get("AUDIT_TOKEN", "")
-		if c.AuditToken == "" {
-			errs = append(errs, errors.New("AUDIT_TOKEN is required unless AUDIT_ENABLED=false"))
 		}
 	case "false":
 	default:

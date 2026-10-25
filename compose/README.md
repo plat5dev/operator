@@ -65,7 +65,7 @@ The end-to-end tests run against this stack: [`e2e/`](../e2e/README.md).
 ## Prod
 
 ```bash
-cp .env.template .env   # set OPERATOR_VERSION, IDENTITY_URL, AUTH_*, AUDIT_TOKEN, and the Postgres passwords
+cp .env.template .env   # set OPERATOR_VERSION, IDENTITY_URL, AUTH_*, and the Postgres passwords
 docker compose -f docker-compose.prod.yml --env-file .env up -d
 ```
 

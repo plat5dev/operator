@@ -8,14 +8,13 @@ import (
 
 // config is operator-audit's environment. Contract: docs/reference/env.md#operator-audit.
 type config struct {
-	Addr          string
-	InternalPort  string
-	DatabaseURL   string
-	InternalToken string
-	WriterRole    string
+	Addr         string
+	InternalPort string
+	DatabaseURL  string
+	WriterRole   string
 }
 
-// loadConfig reads what cmd needs: serve needs the token, migrate the writer role.
+// loadConfig reads what cmd needs: serve needs its ports, migrate the writer role.
 func loadConfig(cmd string, getenv func(string) string) (config, error) {
 	get := func(key, def string) string {
 		if v := strings.TrimSpace(getenv(key)); v != "" {
@@ -24,11 +23,10 @@ func loadConfig(cmd string, getenv func(string) string) (config, error) {
 		return def
 	}
 	c := config{
-		Addr:          get("ADDR", ":5005"),
-		InternalPort:  get("INTERNAL_PORT", "8005"),
-		DatabaseURL:   get("DATABASE_URL", ""),
-		InternalToken: get("INTERNAL_TOKEN", ""),
-		WriterRole:    get("WRITER_ROLE", ""),
+		Addr:         get("ADDR", ":5005"),
+		InternalPort: get("INTERNAL_PORT", "8005"),
+		DatabaseURL:  get("DATABASE_URL", ""),
+		WriterRole:   get("WRITER_ROLE", ""),
 	}
 	var errs []error
 	if c.DatabaseURL == "" {
@@ -36,9 +34,6 @@ func loadConfig(cmd string, getenv func(string) string) (config, error) {
 	}
 	switch cmd {
 	case "serve":
-		if c.InternalToken == "" {
-			errs = append(errs, errors.New("INTERNAL_TOKEN is required: only the gateway writes the operator log"))
-		}
 		if p, err := strconv.Atoi(c.InternalPort); err != nil || p < 1 || p > 65535 {
 			errs = append(errs, errors.New("INTERNAL_PORT must be a port number"))
 		}

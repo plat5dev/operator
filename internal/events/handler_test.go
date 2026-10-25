@@ -58,18 +58,15 @@ func mux(s store) http.Handler {
 	h := NewHandler(s, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	h.now = func() time.Time { return now }
 	m := http.NewServeMux()
-	h.MountInternal(m, "tok")
+	h.MountInternal(m)
 	h.MountPublic(m)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		m.ServeHTTP(w, r.WithContext(apierr.WithRequestID(r.Context(), "req")))
 	})
 }
 
-func call(h http.Handler, method, target, body, token string) *httptest.ResponseRecorder {
+func call(h http.Handler, method, target, body string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(method, target, strings.NewReader(body))
-	if token != "" {
-		r.Header.Set("Authorization", "Bearer "+token)
-	}
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	return w
@@ -89,44 +86,34 @@ func code(t *testing.T, w *httptest.ResponseRecorder) string {
 	return e.Error.Code
 }
 
-func TestInternalNeedsTheToken(t *testing.T) {
-	h := mux(&memStore{})
-	for _, token := range []string{"", "nope"} {
-		w := call(h, "PUT", "/internal/events/r1", string(intentJSON(t, nil)), token)
-		if w.Code != 401 || code(t, w) != "UNAUTHORIZED" {
-			t.Fatalf("token %q: %d", token, w.Code)
-		}
-	}
-}
-
 func TestIntentThenOutcome(t *testing.T) {
 	s := &memStore{}
 	h := mux(s)
 	body := string(intentJSON(t, nil))
-	if w := call(h, "PUT", "/internal/events/r1", body, "tok"); w.Code != 201 {
+	if w := call(h, "PUT", "/internal/events/r1", body); w.Code != 201 {
 		t.Fatalf("intent %d %s", w.Code, w.Body)
 	}
-	if w := call(h, "PUT", "/internal/events/r1", body, "tok"); w.Code != 200 {
+	if w := call(h, "PUT", "/internal/events/r1", body); w.Code != 200 {
 		t.Fatalf("retried intent %d", w.Code)
 	}
-	if w := call(h, "PUT", "/internal/events/r2", `{"method":"GET"}`, "tok"); w.Code != 422 || code(t, w) != "VALIDATION_ERROR" {
+	if w := call(h, "PUT", "/internal/events/r2", `{"method":"GET"}`); w.Code != 422 || code(t, w) != "VALIDATION_ERROR" {
 		t.Fatalf("bad intent %d", w.Code)
 	}
 
 	outcome := `{"outcome":"responded","status":200,"response_bytes":3,"details":{"a":1},"created_id":null}`
-	if w := call(h, "PATCH", "/internal/events/r1", outcome, "tok"); w.Code != 204 {
+	if w := call(h, "PATCH", "/internal/events/r1", outcome); w.Code != 204 {
 		t.Fatalf("outcome %d %s", w.Code, w.Body)
 	}
-	if w := call(h, "PATCH", "/internal/events/r1", `{"outcome":"rejected","status":503,"response_bytes":0}`, "tok"); w.Code != 204 {
+	if w := call(h, "PATCH", "/internal/events/r1", `{"outcome":"rejected","status":503,"response_bytes":0}`); w.Code != 204 {
 		t.Fatalf("second outcome %d", w.Code)
 	}
 	if s.events["r1"].Outcome != OutcomeResponded {
 		t.Fatal("a final event changed")
 	}
-	if w := call(h, "PATCH", "/internal/events/r9", outcome, "tok"); w.Code != 404 {
+	if w := call(h, "PATCH", "/internal/events/r9", outcome); w.Code != 404 {
 		t.Fatalf("no intent %d", w.Code)
 	}
-	if w := call(h, "PATCH", "/internal/events/r1", `{"outcome":"pending"}`, "tok"); w.Code != 422 {
+	if w := call(h, "PATCH", "/internal/events/r1", `{"outcome":"pending"}`); w.Code != 422 {
 		t.Fatalf("pending outcome %d", w.Code)
 	}
 }
@@ -134,9 +121,9 @@ func TestIntentThenOutcome(t *testing.T) {
 func TestList(t *testing.T) {
 	s := &memStore{}
 	h := mux(s)
-	call(h, "PUT", "/internal/events/r1", string(intentJSON(t, nil)), "tok")
+	call(h, "PUT", "/internal/events/r1", string(intentJSON(t, nil)))
 
-	w := call(h, "GET", "/operator-audit-events?operator_id=op_1&limit=10", "", "")
+	w := call(h, "GET", "/operator-audit-events?operator_id=op_1&limit=10", "")
 	if w.Code != 200 {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
@@ -175,11 +162,11 @@ func TestList(t *testing.T) {
 		t.Fatalf("actor %v", actor)
 	}
 
-	if w := call(h, "GET", "/operator-audit-events?organization_id=x", "", ""); w.Code != 422 {
+	if w := call(h, "GET", "/operator-audit-events?organization_id=x", ""); w.Code != 422 {
 		t.Fatalf("unknown filter %d", w.Code)
 	}
 	s.listErr = errors.New("down")
-	if w := call(h, "GET", "/operator-audit-events", "", ""); w.Code != 500 || code(t, w) != "INTERNAL_ERROR" {
+	if w := call(h, "GET", "/operator-audit-events", ""); w.Code != 500 || code(t, w) != "INTERNAL_ERROR" {
 		t.Fatalf("store error %d", w.Code)
 	}
 }

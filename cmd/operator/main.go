@@ -68,7 +68,7 @@ func run(log *slog.Logger) error {
 		gw.Identity = identity.New(cfg.IdentityURL, nil)
 	}
 	if cfg.AuditURL != "" {
-		auditWriter = audit.New(audit.Config{URL: cfg.AuditURL, Token: cfg.AuditToken, Log: log, Metrics: reg})
+		auditWriter = audit.New(audit.Config{URL: cfg.AuditURL, Log: log, Metrics: reg})
 		gw.Audit = auditWriter
 	}
 

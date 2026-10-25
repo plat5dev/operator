@@ -93,7 +93,7 @@ Ordered by `id`, newest first, as Plat5's audit reads are. `starting_after` cont
 
 ## Internal API
 
-On operator-audit's `INTERNAL_PORT`, not routed through the gateway. Every call carries `Authorization: Bearer <INTERNAL_TOKEN>`; missing or wrong is **401**. Only the gateway writes the operator log.
+On operator-audit's `INTERNAL_PORT`, not routed through the gateway. It takes no token: the internal port is reachable only inside the deployment's network, never exposed outside it, as Plat5's internal ports are. The gateway is its only caller.
 
 ### Intent
 

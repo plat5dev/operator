@@ -37,7 +37,7 @@ On every API-port response, errors included:
 
 ## Boot and ready
 
-Boot refuses a missing or invalid route file, missing operator IdP config, or audit on without `AUDIT_URL` and `AUDIT_TOKEN`. JWKS is fetched in the background ([`reference/idp.md`](idp.md#keys)).
+Boot refuses a missing or invalid route file, missing operator IdP config, or audit on without `AUDIT_URL`. JWKS is fetched in the background ([`reference/idp.md`](idp.md#keys)).
 
 `/health/ready` is **200** once JWKS has been fetched, otherwise **503**. Neither identity nor operator-audit is part of ready: while either is down, the requests that need it are **503** and the rest keep working.
 

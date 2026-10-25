@@ -29,7 +29,6 @@ services:
       AUTH_OPERATOR_EMAIL_CLAIM: properties.email
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5412}
       AUDIT_URL: http://operator-audit:8005
-      AUDIT_TOKEN: dev-audit-token
     volumes:
       - ./routes.yml:/etc/operator/routes.yml:ro
     networks:
@@ -61,7 +60,6 @@ services:
     environment:
       # The writer role: it can add events and their outcomes, never change or delete one.
       DATABASE_URL: postgres://audit_writer:audit_writer@operator-postgres:5432/operator?sslmode=disable
-      INTERNAL_TOKEN: dev-audit-token
     depends_on:
       operator-audit-migrate:
         condition: service_completed_successfully

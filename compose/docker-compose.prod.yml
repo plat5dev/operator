@@ -21,7 +21,6 @@ services:
       UPSTREAM_TIMEOUT_MS: ${UPSTREAM_TIMEOUT_MS:-30000}
       AUDIT_ENABLED: ${AUDIT_ENABLED:-true}
       AUDIT_URL: ${AUDIT_URL:-http://operator-audit:8005}
-      AUDIT_TOKEN: ${AUDIT_TOKEN:-}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8004/health/ready"]
       interval: 30s
@@ -36,7 +35,6 @@ services:
     command: ["serve"]
     environment:
       DATABASE_URL: postgres://audit_writer:${AUDIT_WRITER_PASSWORD:-}@operator-postgres:5432/operator?sslmode=disable
-      INTERNAL_TOKEN: ${AUDIT_TOKEN:-}
     depends_on:
       operator-audit-migrate:
         condition: service_completed_successfully

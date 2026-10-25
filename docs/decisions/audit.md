@@ -14,6 +14,7 @@ Google Cloud keeps a separate record of what its own people do to a customer's r
 | The intent is written before anything answers, including a **400** or **404** | "No request reaches a service unrecorded" needs the write first; recording refusals too shows operators probing paths |
 | The intent comes after the lookups in identity | The event then names the nodes and the member, and an identity failure is still recorded as `rejected` |
 | Two writes keyed by the request id, intent then outcome, with the same timing as Plat5's gateway | One delivery model across both front doors, so the guarantee and its failure modes are learned once (Plat5 `concepts/audit.md#delivery`) |
+| The writes take no token; the deployment's network is the boundary | A token shared by the gateway and operator-audit guards nothing the network doesn't, and is one more secret to rotate. Plat5's internal calls carry none, for the same reason (Plat5 `decisions/config-and-apply.md`) |
 
 ## What an event records
 

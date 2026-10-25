@@ -16,7 +16,6 @@ func base() map[string]string {
 		"AUTH_JWKS_URI":  "http://dex:5556/dex/keys",
 		"AUTH_AUDIENCES": "operator-cli, operator-console",
 		"AUDIT_URL":      "http://operator-audit:8005/",
-		"AUDIT_TOKEN":    "secret",
 	}
 }
 
@@ -32,8 +31,8 @@ func TestConfigDefaults(t *testing.T) {
 	if strings.Join(c.Audiences, "|") != "operator-cli|operator-console" {
 		t.Fatalf("audiences = %v", c.Audiences)
 	}
-	if c.AuditURL != "http://operator-audit:8005" || c.AuditToken != "secret" {
-		t.Fatalf("audit = %q %q", c.AuditURL, c.AuditToken)
+	if c.AuditURL != "http://operator-audit:8005" {
+		t.Fatalf("audit = %q", c.AuditURL)
 	}
 	if c.IdentityURL != "" {
 		t.Fatalf("identity = %q", c.IdentityURL)
@@ -49,7 +48,6 @@ func TestConfigAuditOff(t *testing.T) {
 	m := base()
 	m["AUDIT_ENABLED"] = "false"
 	m["AUDIT_URL"] = ""
-	m["AUDIT_TOKEN"] = ""
 	c, err := loadConfig(env(m))
 	if err != nil {
 		t.Fatal(err)
@@ -88,7 +86,6 @@ func TestConfigErrors(t *testing.T) {
 		"bad identity url": {"IDENTITY_URL": "identity:3000"},
 		"no audit url":     {"AUDIT_URL": ""},
 		"bad audit url":    {"AUDIT_URL": "operator-audit:8005"},
-		"no audit token":   {"AUDIT_TOKEN": ""},
 		"audit enabled no": {"AUDIT_ENABLED": "no"},
 	}
 	for name, over := range cases {

@@ -252,9 +252,7 @@ func Timestamp(t time.Time) string {
 
 type Config struct {
 	// URL is operator-audit's internal base URL.
-	URL string
-	// Token is sent as a bearer on every write.
-	Token   string
+	URL     string
 	Log     *slog.Logger
 	Metrics *metrics.Registry
 	// Client is for tests. Default is a plain client; each write sets its own deadline.
@@ -264,7 +262,6 @@ type Config struct {
 // Writer sends intents and outcomes to operator-audit.
 type Writer struct {
 	url    string
-	token  string
 	client *http.Client
 	log    *slog.Logger
 
@@ -300,7 +297,6 @@ func New(cfg Config) *Writer {
 	ctx, cancel := context.WithCancel(context.Background())
 	w := &Writer{
 		url:     strings.TrimRight(cfg.URL, "/"),
-		token:   cfg.Token,
 		client:  client,
 		log:     cfg.Log,
 		queue:   make(chan queued, outcomeQueue),
@@ -357,7 +353,7 @@ func (w *Writer) WriteIntent(ctx context.Context, in *Intent) error {
 			continue
 		}
 		last = fmt.Sprintf("operator-audit returned status %d", status)
-		// A 4xx is the same on every try: a bug or a token mismatch.
+		// A 4xx is the same on every try: a bug.
 		if status >= 400 && status < 500 {
 			break
 		}
@@ -479,7 +475,6 @@ func (w *Writer) send(ctx context.Context, method, requestID string, body []byte
 		return 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+w.token)
 	req.Header.Set("X-Request-ID", requestID)
 	res, err := w.client.Do(req)
 	if err != nil {

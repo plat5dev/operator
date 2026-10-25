@@ -26,7 +26,7 @@ Audit is on or off for the whole deployment. There is no mix.
 
 | | Audit on (default) | Audit off (`AUDIT_ENABLED=false`) |
 |---|---|---|
-| `AUDIT_URL`, `AUDIT_TOKEN` | Required to boot | Ignored |
+| `AUDIT_URL` | Required to boot | Ignored |
 | `operator-audit` | Runs | Not run |
 | Authenticated request | Intent written before it's answered or forwarded. **503** if it can't be | Answered or forwarded with no event |
 | `X-Plat5-Audit-*` | Read, stored, stripped | Stripped |

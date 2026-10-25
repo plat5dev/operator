@@ -107,7 +107,7 @@ func serve(ctx context.Context, cfg config, pool *pgxpool.Pool, log *slog.Logger
 		status(w, http.StatusOK, "healthy")
 	})
 	internal.Handle("GET /metrics", reg)
-	handler.MountInternal(internal, cfg.InternalToken)
+	handler.MountInternal(internal)
 	internal.HandleFunc("/", apierr.NotFound)
 
 	servers := []*http.Server{

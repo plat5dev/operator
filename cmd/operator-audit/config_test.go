@@ -7,11 +7,11 @@ func env(m map[string]string) func(string) string {
 }
 
 func TestConfigServe(t *testing.T) {
-	c, err := loadConfig("serve", env(map[string]string{"DATABASE_URL": "postgres://w@db/operator", "INTERNAL_TOKEN": "t"}))
+	c, err := loadConfig("serve", env(map[string]string{"DATABASE_URL": "postgres://w@db/operator"}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Addr != ":5005" || c.InternalPort != "8005" || c.InternalToken != "t" {
+	if c.Addr != ":5005" || c.InternalPort != "8005" {
 		t.Fatalf("%+v", c)
 	}
 }
@@ -33,9 +33,8 @@ func TestConfigErrors(t *testing.T) {
 	}{
 		"no command":      {"", map[string]string{"DATABASE_URL": "x"}},
 		"unknown command": {"run", map[string]string{"DATABASE_URL": "x"}},
-		"serve no db":     {"serve", map[string]string{"INTERNAL_TOKEN": "t"}},
-		"serve no token":  {"serve", map[string]string{"DATABASE_URL": "x"}},
-		"serve bad port":  {"serve", map[string]string{"DATABASE_URL": "x", "INTERNAL_TOKEN": "t", "INTERNAL_PORT": "http"}},
+		"serve no db":     {"serve", map[string]string{}},
+		"serve bad port":  {"serve", map[string]string{"DATABASE_URL": "x", "INTERNAL_PORT": "http"}},
 		"migrate no role": {"migrate", map[string]string{"DATABASE_URL": "x"}},
 		"migrate no db":   {"migrate", map[string]string{"WRITER_ROLE": "w"}},
 	}
