@@ -1,4 +1,4 @@
-// Command operator is the headless staff gateway. Contract: docs/.
+// Command operator is the headless operator gateway. Contract: docs/.
 package main
 
 import (

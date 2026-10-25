@@ -8,8 +8,8 @@
 |--------|------|
 | Learning the operator plane | [model](concepts/model.md), then [requests](concepts/requests.md) |
 | Running it | [env](reference/env.md), [routes](reference/routes.md), [`compose/`](../compose/README.md) |
-| Building a console or a staff tool | [requests](concepts/requests.md), [operator-audit API](reference/api/operator-audit.md) |
-| Writing a service staff call | Plat5's write-a-service guide, then [headers](reference/headers.md) |
+| Building a console or an operator tool | [requests](concepts/requests.md), [operator-audit API](reference/api/operator-audit.md) |
+| Writing a service operators call | Plat5's write-a-service guide, then [headers](reference/headers.md) |
 
 ## Concepts
 
@@ -17,7 +17,7 @@
 |-----|-----------------|
 | [model](concepts/model.md) | Operators, routes, the chain, acting as a member; the principles |
 | [requests](concepts/requests.md) | The credential, how a request is decided, the route node, acting as a member, forwarding |
-| [audit](concepts/audit.md) | What the staff log records, delivery, what a service adds |
+| [audit](concepts/audit.md) | What the operator log records, delivery, what a service adds |
 | [boundaries](concepts/boundaries.md) | What this plane is for and won't do |
 
 ## Reference
@@ -27,9 +27,9 @@
 | [routes](reference/routes.md) | The route file |
 | [headers](reference/headers.md) | Every header set, stripped or read |
 | [gateway](reference/gateway.md) | Identity calls and cache, CORS, security headers, errors, request log, metrics |
-| [idp](reference/idp.md) | The staff JWT |
+| [idp](reference/idp.md) | The operator JWT |
 | [env](reference/env.md) | Both binaries' environment |
-| [api/operator-audit](reference/api/operator-audit.md) | Staff audit events, the read API, the gateway's writes |
+| [api/operator-audit](reference/api/operator-audit.md) | Operator audit events, the read API, the gateway's writes |
 
 ## Internals
 

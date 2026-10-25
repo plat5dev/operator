@@ -23,7 +23,7 @@ Member lookups aren't cached: a removed member is refused on the next request.
 
 `ALLOWED_ORIGINS` lists the origins whose browser clients may call. An `Origin` in the list is echoed with `Vary: Origin`, and its preflight is answered here: **204**, `Access-Control-Allow-Methods`, `Access-Control-Allow-Headers` (`Authorization, Content-Type, X-Request-ID, traceparent`) and `Access-Control-Max-Age: 600`. Responses expose `X-Request-ID`. Empty means no CORS headers: only same-origin and non-browser clients work. There is no wildcard, and credentials mode isn't used.
 
-A browser client gets its own token from the staff IdP (authorization code with PKCE) and sends it as a bearer.
+A browser client gets its own token from the operator IdP (authorization code with PKCE) and sends it as a bearer.
 
 ## Security headers
 
@@ -37,7 +37,7 @@ On every API-port response, errors included:
 
 ## Boot and ready
 
-Boot refuses a missing or invalid route file, missing staff IdP config, or audit on without `AUDIT_URL` and `AUDIT_TOKEN`. JWKS is fetched in the background ([`reference/idp.md`](idp.md#keys)).
+Boot refuses a missing or invalid route file, missing operator IdP config, or audit on without `AUDIT_URL` and `AUDIT_TOKEN`. JWKS is fetched in the background ([`reference/idp.md`](idp.md#keys)).
 
 `/health/ready` is **200** once JWKS has been fetched, otherwise **503**. Neither identity nor operator-audit is part of ready: while either is down, the requests that need it are **503** and the rest keep working.
 
@@ -51,7 +51,7 @@ All use the Plat5 envelope (Plat5 `docs/reference/errors.md`).
 | Unacceptable path, or a member not active in the node's tree | **400** `INVALID_REQUEST` |
 | No route for the method and path | **404** `NOT_FOUND` |
 | The route node not found | **404** `NOT_FOUND`, `details: { resource: "node", id }` |
-| Staff IdP keys never fetched, audit intent not written, identity unreachable | **503** `SERVICE_UNAVAILABLE` |
+| Operator IdP keys never fetched, audit intent not written, identity unreachable | **503** `SERVICE_UNAVAILABLE` |
 | Upstream unreachable, timed out, or failing mid-response | **502** with the `SERVICE_UNAVAILABLE` code |
 
 A client disconnect writes no body.

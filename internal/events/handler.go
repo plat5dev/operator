@@ -38,12 +38,12 @@ func (h *Handler) MountInternal(mux *http.ServeMux, token string) {
 	mux.Handle("PATCH /internal/events/{request_id}", requireToken(token, http.HandlerFunc(h.PatchOutcome)))
 }
 
-// MountPublic registers the staff log read. The gateway publishes it as a route.
+// MountPublic registers the operator log read. The gateway publishes it as a route.
 func (h *Handler) MountPublic(mux *http.ServeMux) {
 	mux.HandleFunc("GET /operator-audit-events", h.List)
 }
 
-// requireToken admits the gateway alone: only it writes the staff log.
+// requireToken admits the gateway alone: only it writes the operator log.
 func requireToken(token string, next http.Handler) http.Handler {
 	want := []byte("Bearer " + token)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -167,7 +167,7 @@ func toResponse(e *Event) eventResponse {
 	}
 }
 
-// List is one page of the staff log, newest first.
+// List is one page of the operator log, newest first.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	f, err := ParseFilter(r.URL.RawQuery)
 	if err != nil {

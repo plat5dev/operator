@@ -35,7 +35,7 @@ type Identity interface {
 	Member(ctx context.Context, rootID, memberID, requestID string) (principal string, err error)
 }
 
-// AuditWriter records the staff audit log. *audit.Writer is the real one.
+// AuditWriter records the operator audit log. *audit.Writer is the real one.
 type AuditWriter interface {
 	WriteIntent(ctx context.Context, in *audit.Intent) error
 	SendOutcome(requestID string, out audit.Outcome)

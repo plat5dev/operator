@@ -1,5 +1,5 @@
 // Package e2e drives the operator gateway against a running Plat5 stack: the tree by id,
-// acting as a member, the chain sent to services, restore, and the staff audit log.
+// acting as a member, the chain sent to services, restore, and the operator audit log.
 // Opt-in: OPERATOR_E2E=1. See README.md.
 package e2e
 
@@ -23,7 +23,7 @@ func env(name, fallback string) string {
 	return fallback
 }
 
-// operator is the gateway as a staff client sees it.
+// operator is the gateway as an operator's client sees it.
 type operator struct {
 	t     *testing.T
 	base  string
@@ -126,10 +126,10 @@ func (o *operator) admin(path string, body any) (int, []byte, error) {
 	return res.StatusCode, out, err
 }
 
-// mint gets a staff token from Plat5 Auth's dev mode.
+// mint gets an operator token from Plat5 Auth's dev mode.
 func (o *operator) mint() (string, error) {
-	body := `{"email":"staff@example.com","client_id":"operator-console"}`
-	res, err := o.http.Post(env("STAFF_AUTH_URL", "http://localhost:5411")+"/dev/token", "application/json", strings.NewReader(body))
+	body := `{"email":"operator@example.com","client_id":"operator-console"}`
+	res, err := o.http.Post(env("OPERATOR_AUTH_URL", "http://localhost:5411")+"/dev/token", "application/json", strings.NewReader(body))
 	if err != nil {
 		return "", err
 	}
@@ -215,7 +215,7 @@ func TestOperator(t *testing.T) {
 	o := setup(t)
 	suffix := fmt.Sprint(time.Now().UnixNano())
 
-	// An org made by staff has no member behind it.
+	// An org an operator makes has no member behind it.
 	org := str(o.must(201, "POST", "/roots/organization", map[string]any{"display_name": "E2E " + suffix}).body, "id")
 	danaIdP := map[string]any{"issuer": "http://localhost:5401", "subject": "e2e-dana-" + suffix}
 	dana := str(o.must(201, "POST", "/nodes/"+org+"/members", map[string]any{"idp": danaIdP, "role": "member"}).body, "id")
@@ -245,10 +245,10 @@ func TestOperator(t *testing.T) {
 			t.Fatalf("Dana's permissions on her project: %v", perms)
 		}
 
-		// Created by staff alone: no member, so no binding.
+		// Created by the operator alone: no member, so no binding.
 		bare := str(o.must(201, "POST", "/nodes/"+org+"/children/project", map[string]any{"display_name": "Bare"}).body, "id")
 		if b := list(o.must(200, "GET", "/nodes/"+bare+"/bindings?inherited=false", nil), "bindings"); len(b) != 0 {
-			t.Fatalf("bindings on a project staff made: %v", b)
+			t.Fatalf("bindings on a project the operator made: %v", b)
 		}
 
 		// A filtered list, as the member: what Dana can read. Without a member, the full list.
@@ -359,7 +359,7 @@ func TestOperator(t *testing.T) {
 		}
 	})
 
-	t.Run("the staff log by node", func(t *testing.T) {
+	t.Run("the operator log by node", func(t *testing.T) {
 		// Everything on the org and below: the creates under it, the project reads, the echo.
 		events := list(o.must(200, "GET", "/operator-audit-events?node_id="+org+"&limit=100", nil), "audit_events")
 		routes := map[string]bool{}
@@ -384,7 +384,7 @@ func TestOperator(t *testing.T) {
 	})
 
 	t.Run("Plat5's audit reads go through", func(t *testing.T) {
-		// Staff requests aren't in Plat5's log; the read itself works by node.
+		// Operator requests aren't in Plat5's log; the read itself works by node.
 		r := o.must(200, "GET", "/nodes/"+org+"/audit-events", nil)
 		if _, ok := r.body["audit_events"]; !ok {
 			t.Fatalf("%s", r.raw)

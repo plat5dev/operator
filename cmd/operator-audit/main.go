@@ -1,4 +1,4 @@
-// Command operator-audit stores the staff audit log and serves it back through the gateway.
+// Command operator-audit stores the operator audit log and serves it back through the gateway.
 // Contract: docs/reference/api/operator-audit.md.
 //
 //	operator-audit migrate   as the schema owner: migrations, then the writer's grants

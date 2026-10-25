@@ -16,7 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Schema holds the staff audit log. Other operator-plane concerns get their own.
+// Schema holds the operator audit log. Other operator-plane concerns get their own.
 const Schema = "audit"
 
 //go:embed migrations/*.sql

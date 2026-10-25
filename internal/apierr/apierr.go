@@ -45,7 +45,7 @@ func write(w http.ResponseWriter, r *http.Request, status int, typ, code, messag
 	}})
 }
 
-// Unauthorized is a missing or invalid staff token. reason is missing, invalid, or expired.
+// Unauthorized is a missing or invalid operator token. reason is missing, invalid, or expired.
 func Unauthorized(w http.ResponseWriter, r *http.Request, reason string) {
 	w.Header().Set("WWW-Authenticate", "Bearer")
 	write(w, r, http.StatusUnauthorized, "invalid_request_error", "UNAUTHORIZED", "Authentication required.", map[string]string{"reason": reason})

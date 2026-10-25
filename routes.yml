@@ -3,7 +3,7 @@
 # its own file with its addresses and its services' routes.
 #
 # Plat5 identity's service API for other front doors, except creating keys, which mints
-# customer credentials. Plat5's audit reads. The staff audit log read (drop it, and the
+# customer credentials. Plat5's audit reads. The operator audit log read (drop it, and the
 # operator-audit service, with AUDIT_ENABLED=false).
 services:
   identity:

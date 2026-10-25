@@ -1,4 +1,4 @@
-# Dev stack: gateway, Plat5 Auth as the staff IdP, an echo service, and the staff audit log
+# Dev stack: gateway, Plat5 Auth as the operator IdP, an echo service, and the operator audit log
 # (Postgres and operator-audit). The gateway joins Plat5's compose network to reach identity
 # and audit: start Plat5 first. See README.md.
 name: operator
@@ -20,10 +20,10 @@ services:
     environment:
       ROUTES_FILE: /etc/operator/routes.yml
       IDENTITY_URL: http://identity:3000
-      # Plat5 Auth as the staff IdP: the operator id is its user id, and the email is
-      # in the token because staff-auth sets AUTH_TOKEN_EMAIL.
+      # Plat5 Auth as the operator IdP: the operator id is its user id, and the email is
+      # in the token because operator-auth sets AUTH_TOKEN_EMAIL.
       AUTH_ISSUER: http://localhost:5411
-      AUTH_JWKS_URI: http://staff-auth:5000/.well-known/jwks.json
+      AUTH_JWKS_URI: http://operator-auth:5000/.well-known/jwks.json
       AUTH_AUDIENCES: operator-console
       AUTH_OPERATOR_ID_CLAIM: properties.user_id
       AUTH_OPERATOR_EMAIL_CLAIM: properties.email
@@ -36,7 +36,7 @@ services:
       - default
       - plat5
     depends_on:
-      staff-auth:
+      operator-auth:
         condition: service_healthy
       echo:
         condition: service_started
@@ -95,7 +95,7 @@ services:
       POSTGRES_DB: operator
       AUDIT_OWNER_PASSWORD: audit_owner
       AUDIT_WRITER_PASSWORD: audit_writer
-      STAFF_AUTH_DB: staff_auth
+      OPERATOR_AUTH_DB: operator_auth
     volumes:
       - ./postgres-init.sh:/docker-entrypoint-initdb.d/10-audit-roles.sh:ro
       - operator-postgres:/var/lib/postgresql/data
@@ -105,24 +105,24 @@ services:
       timeout: 5s
       retries: 10
 
-  # The staff IdP: Plat5 Auth in dev mode, its own issuer and database. Never the
+  # The operator IdP: Plat5 Auth in dev mode, its own issuer and database. Never the
   # customer issuer (docs/reference/idp.md).
-  staff-auth:
+  operator-auth:
     image: ghcr.io/plat5dev/auth:${AUTH_VERSION:-v0.2.2}
     ports:
       - "5411:5000"
     environment:
-      DATABASE_URL: postgres://postgres:postgres@operator-postgres:5432/staff_auth?sslmode=disable
+      DATABASE_URL: postgres://postgres:postgres@operator-postgres:5432/operator_auth?sslmode=disable
       INTERNAL_PORT: 5001
       PUBLIC_ISSUER_URL: http://localhost:5411
-      AUTH_DISPLAY_NAME: Plat5 staff
+      AUTH_DISPLAY_NAME: Plat5 operator
       AUTH_ALLOWED_CLIENTS: operator-console
       AUTH_ALLOWED_REDIRECT_URIS: http://localhost:5412/callback
       AUTH_ALLOWED_ORIGINS: http://localhost:5412
       AUTH_TOKEN_EMAIL: "true"
       # Dev only: POST /dev/token, and a password login.
       AUTH_DEV_MODE: "true"
-      AUTH_DEV_USERS: staff@example.com:password
+      AUTH_DEV_USERS: operator@example.com:password
     depends_on:
       operator-postgres:
         condition: service_healthy

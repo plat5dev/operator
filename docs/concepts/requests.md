@@ -4,7 +4,7 @@ How this gateway decides a request: the credential, the order, the route node, a
 
 ## Credential
 
-`Authorization: Bearer <jwt>` from the staff IdP, for a configured audience ([`reference/idp.md`](../reference/idp.md)). Nothing else: no cookies, no API keys.
+`Authorization: Bearer <jwt>` from the operator IdP, for a configured audience ([`reference/idp.md`](../reference/idp.md)). Nothing else: no cookies, no API keys.
 
 ## How a request is decided
 
@@ -28,7 +28,7 @@ There is no authorization step. Any authenticated operator may call any route ([
 A route that addresses a Plat5 node names the param holding it (`node`, [`reference/routes.md`](../reference/routes.md#route-fields)). For such a route this gateway asks identity for the node and each ancestor, root first: the chain.
 
 - **Sent as Plat5 sends it.** The service gets `X-Plat5-<Kind>-Id` for each node in the chain ([`reference/headers.md`](../reference/headers.md)). A service written for Plat5's gateway reads node ids from the path or those headers; through this gateway, both are there.
-- **Recorded.** The chain is the audit event's `nodes`, so the staff log can be read for a node and everything below it.
+- **Recorded.** The chain is the audit event's `nodes`, so the operator log can be read for a node and everything below it.
 - **Not found** → **404** `NOT_FOUND`. Deleted and purged nodes are found: their chain is sent like any other, and the service applies its own state rules. Restoring a deleted node goes through here.
 - **Nothing else is checked.** The node's status, kind and the operator's reach are not this gateway's to judge.
 
@@ -51,7 +51,7 @@ POST /as/01jbyb0d…/nodes/01jbx9q3…/children/project
 - **The member must be active in the node's tree.** Identity's member lookup in the chain's root must answer `status: active`. Anything else is **400**: a removed member, a member of another tree, an id that isn't a member. Suspension is per person in Plat5 and isn't checked here, as identity doesn't check it on a member id it is sent.
 - **The service is told the member and its principal.** `X-Plat5-Member-Id`, and `X-Plat5-Principal` as identity names the member's principal: `person` or `service_account`.
 - **Access is the operator's, never the member's.** The member's bindings and labels are never read or applied. A filtered list asked as a member shows what that member can read.
-- **Both are recorded.** The staff audit log has the operator as the actor and the member as `acting_as` ([`concepts/audit.md`](audit.md)).
+- **Both are recorded.** The operator audit log has the operator as the actor and the member as `acting_as` ([`concepts/audit.md`](audit.md)).
 
 Without `/as/`, a request carries no member id and no principal. A service that needs one refuses it as malformed; that's correct, and the operator retries as a member if the change should be authored. Identity's filtered lists are the full list without one, as `GET /nodes` is.
 
@@ -61,7 +61,7 @@ The path is forwarded exactly as received, after the `/as/{member}` prefix is st
 
 Because the matched path is the path the service sees, this gateway refuses paths it could read differently from the service: dot segments (`.`, `..`), empty segments (`//`), and an encoded `/` or `\` in a segment. Those are **400**.
 
-Before forwarding, this gateway strips `Authorization`, `Cookie`, `X-API-Key` and every incoming `X-Plat5-*` header, then sets its own. A client can't name a node, a member or an operator, and the service never sees a staff credential.
+Before forwarding, this gateway strips `Authorization`, `Cookie`, `X-API-Key` and every incoming `X-Plat5-*` header, then sets its own. A client can't name a node, a member or an operator, and the service never sees an operator's credential.
 
 Upstream status and body pass through untranslated. An upstream that can't be reached, times out, or fails mid-response → **502**.
 

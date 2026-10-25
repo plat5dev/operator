@@ -1,6 +1,6 @@
-# Staff IdP
+# Operator IdP
 
-This gateway validates JWTs from one OIDC issuer: the staff IdP. Okta, Entra, Google Workspace, Keycloak, Plat5 Auth, or anything else that publishes a JWKS. Never the customer IdP.
+This gateway validates JWTs from one OIDC issuer: the operator IdP. Okta, Entra, Google Workspace, Keycloak, Plat5 Auth, or anything else that publishes a JWKS. Never the customer IdP.
 
 How a caller gets a token is the IdP's business. People typically use authorization code with PKCE; automation typically uses client credentials. This gateway only checks the token.
 
@@ -12,9 +12,9 @@ How a caller gets a token is the IdP's business. People typically use authorizat
 | `AUTH_JWKS_URI` | yes | Where this gateway fetches keys. Separate from the issuer so a container can reach JWKS on an internal address while `iss` stays public |
 | `AUTH_AUDIENCES` | yes | Comma-separated. The token's `aud` must contain one. Empty refuses boot |
 | `AUTH_OPERATOR_ID_CLAIM` | no | Dotted JSON path to the operator id. Default `sub` |
-| `AUTH_OPERATOR_EMAIL_CLAIM` | no | Dotted JSON path to the operator's email, recorded in the staff audit log. Default `email`. Absent in a token, the operator has no email |
+| `AUTH_OPERATOR_EMAIL_CLAIM` | no | Dotted JSON path to the operator's email, recorded in the operator audit log. Default `email`. Absent in a token, the operator has no email |
 
-The audience is required, unlike at Plat5's gateway. A staff IdP issues tokens for many internal applications; without an audience check, a token for any of them would be an operator token.
+The audience is required, unlike at Plat5's gateway. An operator IdP issues tokens for many internal applications; without an audience check, a token for any of them would be an operator token.
 
 ## Token checks
 
@@ -44,7 +44,7 @@ JWKS is fetched at boot and retried with backoff until it succeeds. Until then `
 
 ## Local development
 
-Compose runs [Plat5 Auth](https://github.com/plat5dev/auth) as the staff IdP: its own issuer and database, never the customer one. Dev mode seeds `staff@example.com` / `password` for the browser, and scripts mint a token with `POST /dev/token`. Both are local development only. Plat5 Auth puts its ids under `properties`, so compose sets `AUTH_OPERATOR_ID_CLAIM=properties.user_id` and `AUTH_OPERATOR_EMAIL_CLAIM=properties.email` (the issuer sets `AUTH_TOKEN_EMAIL=true`). See [`compose/README.md`](../../compose/README.md).
+Compose runs [Plat5 Auth](https://github.com/plat5dev/auth) as the operator IdP: its own issuer and database, never the customer one. Dev mode seeds `operator@example.com` / `password` for the browser, and scripts mint a token with `POST /dev/token`. Both are local development only. Plat5 Auth puts its ids under `properties`, so compose sets `AUTH_OPERATOR_ID_CLAIM=properties.user_id` and `AUTH_OPERATOR_EMAIL_CLAIM=properties.email` (the issuer sets `AUTH_TOKEN_EMAIL=true`). See [`compose/README.md`](../../compose/README.md).
 
 ## Switching IdPs
 

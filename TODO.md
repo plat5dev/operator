@@ -2,9 +2,9 @@
 
 ## Next
 
-- **The operator console.** `template-operator-console` follows the route list here: the tree from `GET /nodes`, node pages by id, members by root, acting as a member, and the staff log by node. It still calls identity's earlier paths.
-- **In `plat5 start`.** The CLI's local stack runs an operator module: this gateway, operator-audit, the staff IdP and their Postgres, on Plat5's network with `IDENTITY_URL` set. Plat5's `TODO.md` holds the same item.
-- **Starters' staff routes.** Each starter's `routes.operator.yml` lists its API's own paths by node id, with `node` and `as_member` where they apply ([`docs/reference/routes.md`](docs/reference/routes.md)), and `plat5 init` merges them under `services:`.
+- **The operator console.** `template-operator-console` follows the route list here: the tree from `GET /nodes`, node pages by id, members by root, acting as a member, and the operator log by node. It still calls identity's earlier paths.
+- **In `plat5 start`.** The CLI's local stack runs an operator module: this gateway, operator-audit, the operator IdP and their Postgres, on Plat5's network with `IDENTITY_URL` set. Plat5's `TODO.md` holds the same item.
+- **Starters' operator routes.** Each starter's `routes.operator.yml` lists its API's own paths by node id, with `node` and `as_member` where they apply ([`docs/reference/routes.md`](docs/reference/routes.md)), and `plat5 init` merges them under `services:`.
 - **Telemetry to Plat5's contract.** Plat5's log field names (`timestamp`, `message`), `http_requests_total` and `http_request_duration_seconds`, process metrics, and OTLP traces when `OTEL_EXPORTER_OTLP_ENDPOINT` is set (Plat5 `docs/reference/telemetry.md`).
 
 # Deferred
@@ -27,14 +27,14 @@ Ready: a deployment where not every operator may reach every customer.
 | Work | Ready when |
 |------|------------|
 | Trusted proxies for an audit event's `ip` | An event's `ip` is needed as evidence |
-| A reason or ticket on staff requests | A policy or an auditor requires a stated reason for access. Acting as a member may be that trigger |
-| Staff access shown to customers, like Google Cloud's Access Transparency | A customer needs to see staff access to their org. Events already carry the chain to filter by |
+| A reason or ticket on operator requests | A policy or an auditor requires a stated reason for access. Acting as a member may be that trigger |
+| Operator access shown to customers, like Google Cloud's Access Transparency | A customer needs to see operator access to their org. Events already carry the chain to filter by |
 | Configurable audit actor claims | The IdP names the client in a claim other than `azp` or `client_id` |
 | Audit retention and purge | A retention policy must be enforced, or storage growth hurts. Partitions are monthly, so retention is dropping them |
 | Audit export to WORM storage or a SIEM | Tamper evidence beyond the database role is required, or security monitoring needs the events |
-| API keys | A staff caller can't get a token from the IdP |
+| API keys | An operator can't get a token from the IdP |
 | A route source shared with Plat5's config | Hand-copied service URLs or paths cause a real mismatch |
 | Customer login provisioning | Operators must create customer logins |
-| Request-and-approve access, like Google Cloud's Access Approval | A customer requires approval per staff access |
+| Request-and-approve access, like Google Cloud's Access Approval | A customer requires approval per operator access |
 | Plat5 audit event by request id | Support works from tickets carrying a `request_id` (Plat5 `TODO.md`) |
 | Checking suspension when acting as a member | Plat5 identity refuses a suspended person's member id, or a policy forbids acting for one |

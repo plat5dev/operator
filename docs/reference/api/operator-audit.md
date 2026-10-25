@@ -1,6 +1,6 @@
 # operator-audit API
 
-The staff audit event, its read API, and the gateway's writes. Concept: [audit](../../concepts/audit.md).
+The operator audit event, its read API, and the gateway's writes. Concept: [audit](../../concepts/audit.md).
 
 ## Event
 
@@ -10,7 +10,7 @@ The staff audit event, its read API, and the gateway's writes. Concept: [audit](
   "occurred_at": "2026-10-09T18:30:00.123Z",
   "request_id": "9f2c4e1a7b3d4c8e9a0b1c2d3e4f5a6b",
   "actor": {
-    "issuer": "https://staff.example.okta.com/oauth2/default",
+    "issuer": "https://example.okta.com/oauth2/default",
     "operator_id": "00u1abc",
     "email": "a@example.com",
     "client_id": "operator-console"
@@ -93,7 +93,7 @@ Ordered by `id`, newest first, as Plat5's audit reads are. `starting_after` cont
 
 ## Internal API
 
-On operator-audit's `INTERNAL_PORT`, not routed through the gateway. Every call carries `Authorization: Bearer <INTERNAL_TOKEN>`; missing or wrong is **401**. Only the gateway writes the staff log.
+On operator-audit's `INTERNAL_PORT`, not routed through the gateway. Every call carries `Authorization: Bearer <INTERNAL_TOKEN>`; missing or wrong is **401**. Only the gateway writes the operator log.
 
 ### Intent
 

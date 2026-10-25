@@ -1,4 +1,4 @@
-// Package audit writes the staff audit log from the gateway. Contract: docs/concepts/audit.md.
+// Package audit writes the operator audit log from the gateway. Contract: docs/concepts/audit.md.
 // The intent is written before the gateway answers or forwards, and the client waits on it.
 // The outcome follows in the background. Audit is on or off for the whole deployment.
 package audit

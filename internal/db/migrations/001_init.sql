@@ -1,4 +1,4 @@
--- One row per authenticated staff request (docs/internals/audit-storage.md). Monthly
+-- One row per authenticated operator request (docs/internals/audit-storage.md). Monthly
 -- partitions on occurred_at are created by ensure_partition, which the writer may call.
 CREATE TABLE audit_events (
     id                  TEXT        NOT NULL,  -- ULID on occurred_at

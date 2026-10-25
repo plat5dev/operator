@@ -4,7 +4,7 @@ What the operator plane is for, and what it won't do.
 
 ## What it's for
 
-Staff work on a Plat5 deployment's customers: browsing the tree, fixing data during an incident, restoring a deleted project, suspending a person, recovering an org that lost its last admin. Each of these is a call to a service's own API by node id, recorded in the staff audit log.
+Operator work on a Plat5 deployment's customers: browsing the tree, fixing data during an incident, restoring a deleted project, suspending a person, recovering an org that lost its last admin. Each of these is a call to a service's own API by node id, recorded in the operator audit log.
 
 Support that a customer should see and consent to is a binding in the customer's tree, not this plane: a support role with a `max_duration`, added by the customer (Plat5 `docs/decisions/access.md`). This plane is for what happens without the customer in the loop.
 
@@ -26,7 +26,7 @@ Do not add these because they would be convenient:
 - Audit on for some routes or operators and off for others
 - 401s, query strings, bodies, tokens, or claims other than the actor fields in an audit event
 - A client-chosen request id
-- Staff events in a Plat5 tree's log, or Plat5's audit service or database as the staff log's store
+- Operator events in a Plat5 tree's log, or Plat5's audit service or database as the operator log's store
 - Updating or deleting audit events through an API, or running `operator-audit` as a role that can delete
 - Reading inside `X-Plat5-Audit-Details`
 

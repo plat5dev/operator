@@ -6,7 +6,7 @@ How I decide: `my-principles` skill. This file is how to work here, not what the
 
 ## What this is
 
-A headless gateway for staff: a second front door onto the services a Plat5 deployment runs. Staff JWT in, audit event written, path out. This repo also holds `operator-audit`, the service that stores the staff audit log.
+A headless gateway for operators: a second front door onto the services a Plat5 deployment runs. Operator JWT in, audit event written, path out. This repo also holds `operator-audit`, the service that stores the operator audit log.
 
 ## Where the rules live
 
@@ -16,14 +16,14 @@ A headless gateway for staff: a second front door onto the services a Plat5 depl
 | The rules, one concept per doc | [`docs/concepts/`](docs/concepts/): requests, audit |
 | What this plane won't do (stop conditions) | [`docs/concepts/boundaries.md`](docs/concepts/boundaries.md#not-in-the-operator-plane) |
 | Shapes: route file, headers, APIs, env | [`docs/reference/`](docs/reference/) |
-| How the staff log is stored | [`docs/internals/`](docs/internals/) |
+| How the operator log is stored | [`docs/internals/`](docs/internals/) |
 | Why each decision was made, by topic | [`docs/decisions/`](docs/decisions/README.md) |
 | The map of all of it | [`docs/README.md`](docs/README.md) |
 | What's next, and deferred work and when it's ready | [`TODO.md`](TODO.md) |
 
 ## Siblings
 
-Plat5 is the customer runtime (gateway, control plane, identity, audit), and its docs are law for its side of every contract here. This repo imports no Plat5 code: it dials service addresses and uses Plat5's public, documented service APIs and headers as Plat5 defines them. Auth is an IdP, used here as the local staff IdP. A console is a separate repo and a client of this API.
+Plat5 is the customer runtime (gateway, control plane, identity, audit), and its docs are law for its side of every contract here. This repo imports no Plat5 code: it dials service addresses and uses Plat5's public, documented service APIs and headers as Plat5 defines them. Auth is an IdP, used here as the local operator IdP. A console is a separate repo and a client of this API.
 
 ## Working here
 

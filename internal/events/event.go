@@ -1,4 +1,4 @@
-// Package events is operator-audit: it stores the staff audit log the gateway writes and
+// Package events is operator-audit: it stores the operator audit log the gateway writes and
 // serves it back through the gateway. Contract: docs/reference/api/operator-audit.md.
 package events
 

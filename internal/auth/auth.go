@@ -1,4 +1,4 @@
-// Package auth validates staff JWTs. Contract: docs/reference/idp.md.
+// Package auth validates operator JWTs. Contract: docs/reference/idp.md.
 package auth
 
 import (

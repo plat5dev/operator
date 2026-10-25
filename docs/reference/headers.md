@@ -13,13 +13,13 @@ Every header this gateway sets, strips or reads. Plat5 defines `X-Plat5-*` heade
 | `X-Request-ID` | Every request | Generated here. A client's is replaced |
 | `traceparent` | When the client sent one | Passed through |
 
-Never sent: the staff token, the operator's email or claims, an `X-Plat5-Principal` without a member, the member's bindings or labels.
+Never sent: the operator's token, the operator's email or claims, an `X-Plat5-Principal` without a member, the member's bindings or labels.
 
 ## Stripped
 
 | Header | Direction | Why |
 |--------|-----------|-----|
-| `Authorization`, `Cookie`, `X-API-Key` | Request | The staff credential, or one that isn't accepted here. Never reaches a service |
+| `Authorization`, `Cookie`, `X-API-Key` | Request | The operator's credential, or one that isn't accepted here. Never reaches a service |
 | Every `X-Plat5-*` | Request, before this gateway sets its own | A client can't name a node, a member or an operator |
 | `X-Request-ID` | Request and response | This gateway owns the request id |
 | Every `X-Plat5-Audit-*` | Response | What the service tells the audit log ([audit](../concepts/audit.md#what-a-service-adds)). Read first when audit is on; stripped on every route, audit on or off |

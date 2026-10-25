@@ -37,7 +37,7 @@ func loadConfig(cmd string, getenv func(string) string) (config, error) {
 	switch cmd {
 	case "serve":
 		if c.InternalToken == "" {
-			errs = append(errs, errors.New("INTERNAL_TOKEN is required: only the gateway writes the staff log"))
+			errs = append(errs, errors.New("INTERNAL_TOKEN is required: only the gateway writes the operator log"))
 		}
 		if p, err := strconv.Atoi(c.InternalPort); err != nil || p < 1 || p > 65535 {
 			errs = append(errs, errors.New("INTERNAL_PORT must be a port number"))

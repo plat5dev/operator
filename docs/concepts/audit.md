@@ -1,8 +1,8 @@
 # Audit
 
-The staff audit log: which operator called which route, on which nodes, as which member, from where, and how the request ended. This gateway records every authenticated request. The **operator-audit** service, in this repo, stores the events and serves them back through this gateway.
+The operator audit log: which operator called which route, on which nodes, as which member, from where, and how the request ended. This gateway records every authenticated request. The **operator-audit** service, in this repo, stores the events and serves them back through this gateway.
 
-Plat5 keeps an audit log per tree: a customer's record of its own members. This log is separate and in a different store. A staff request is never written into a tree's log, even when acting as a member, and customers don't read this one.
+Plat5 keeps an audit log per tree: a customer's record of its own members. This log is separate and in a different store. An operator request is never written into a tree's log, even when acting as a member, and customers don't read this one.
 
 ## The model
 
@@ -36,13 +36,13 @@ This gateway logs `audit: off` at warn level at boot. Turning audit on doesn't b
 
 ## Which requests
 
-With audit on, every request that authenticates is recorded, whatever its method. No route opts out. Reads are recorded, because staff reading customer data is the access this log exists to show.
+With audit on, every request that authenticates is recorded, whatever its method. No route opts out. Reads are recorded, because operators reading customer data is the access this log exists to show.
 
 | Gateway result | Event |
 |----------------|-------|
 | `OPTIONS` preflight | None. It's answered before authentication |
 | **401** | None. There's no trusted actor, and nothing bounds the rate. The request log line and `operator_unauthenticated_total` count it |
-| **503**, staff IdP keys never fetched | None. The token can't be judged, so there's no actor |
+| **503**, operator IdP keys never fetched | None. The token can't be judged, so there's no actor |
 | **503**, intent not written | None, or `rejected` if the intent landed unseen ([delivery](#delivery)) |
 | **400** unacceptable path, **404** no route | `rejected`. `route` is `null`, `path` is set |
 | **404** route node not found | `rejected`. `route` is set, `nodes` is `[]` |
@@ -70,7 +70,7 @@ Audit isn't part of this gateway's `/health/ready`. With audit on, every authent
 
 ## What a service adds
 
-Headers on the upstream response, as Plat5 defines them (Plat5 `docs/concepts/audit.md`). This gateway reads them as Plat5's gateway does and doesn't import Plat5 code. A service doesn't know which front door called it: what it sends on a staff request is what it sends to Plat5's gateway.
+Headers on the upstream response, as Plat5 defines them (Plat5 `docs/concepts/audit.md`). This gateway reads them as Plat5's gateway does and doesn't import Plat5 code. A service doesn't know which front door called it: what it sends on an operator request is what it sends to Plat5's gateway.
 
 | Header | Becomes | Rule |
 |--------|---------|------|
@@ -93,7 +93,7 @@ Any operator can read the whole log until a decision service narrows it ([`TODO.
 - 401s in the log
 - Audit on for some routes or operators and off for others
 - A client-chosen request id as an event's key
-- Staff events in a Plat5 tree's log, or Plat5's audit service or database as this log's store
+- Operator events in a Plat5 tree's log, or Plat5's audit service or database as this log's store
 - This log shown to customers (deferred, [`TODO.md`](../../TODO.md))
 - This gateway reading inside details, or a service header creating, moving or re-outcoming an event
 - Changing an event after its outcome, or deleting events through an API

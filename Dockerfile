@@ -23,11 +23,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
-# The staff audit log store: ghcr.io/plat5dev/operator-audit. Contract: docs/reference/api/operator-audit.md.
+# The operator audit log store: ghcr.io/plat5dev/operator-audit. Contract: docs/reference/api/operator-audit.md.
 FROM base AS operator-audit
 
 LABEL org.opencontainers.image.title="operator-audit" \
-      org.opencontainers.image.description="Plat5 operator staff audit log"
+      org.opencontainers.image.description="Plat5 operator audit log"
 
 COPY --from=builder /out/operator-audit /usr/local/bin/operator-audit
 
@@ -42,7 +42,7 @@ CMD ["serve"]
 FROM base AS prod
 
 LABEL org.opencontainers.image.title="operator" \
-      org.opencontainers.image.description="Plat5 headless staff gateway"
+      org.opencontainers.image.description="Plat5 headless operator gateway"
 
 COPY --from=builder /out/operator /usr/local/bin/operator
 COPY routes.yml /routes.yml
