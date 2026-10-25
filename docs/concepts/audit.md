@@ -2,7 +2,7 @@
 
 The operator audit log: which operator called which route, on which nodes, as which member, from where, and how the request ended. This gateway records every authenticated request. The **operator-audit** service, in this repo, stores the events and serves them back through this gateway.
 
-Plat5 keeps an audit log per tree: a customer's record of its own members. This log is separate and in a different store. An operator request is never written into a tree's log, even when acting as a member, and customers don't read this one.
+Plat5 keeps an audit log per tree, a customer's record of its own members, and one per person for their own routes. This log is separate and in a different store. An operator request is never written into a tree's log, even when acting as a member, and customers don't read this one.
 
 ## The model
 
@@ -77,7 +77,7 @@ Headers on the upstream response, as Plat5 defines them (Plat5 `docs/concepts/au
 | `X-Plat5-Audit-Details` | `details` | One JSON object, visible ASCII only, at most 4096 bytes. Only on `responded`. Stored as sent; this gateway never reads inside it |
 | `X-Plat5-Audit-Created` | `created_id` | One id: visible ASCII, one path segment, at most 128 bytes. Only on `responded` |
 
-Either one invalid is recorded as `null`, with a warning. Every `X-Plat5-Audit-*` header is stripped from the response on every route, audit on or off, and from the request before upstream. `X-Plat5-Audit-Root` and `X-Plat5-Audit-Member` name a Plat5 tree for a sign-in route; this log has no use for them and they're dropped.
+Either one invalid is recorded as `null`, with a warning. Every `X-Plat5-Audit-*` header is stripped from the response on every route, audit on or off, and from the request before upstream. `X-Plat5-Audit-Nodes` and `X-Plat5-Audit-Member` name the tree a Plat5 user route changed; this log has no use for them and they're dropped.
 
 None of them can create an event, or change its outcome, status, actor, nodes or member.
 

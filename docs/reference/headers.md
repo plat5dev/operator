@@ -13,7 +13,7 @@ Every header this gateway sets, strips or reads. Plat5 defines `X-Plat5-*` heade
 | `X-Request-ID` | Every request | Generated here. A client's is replaced |
 | `traceparent` | When the client sent one | Passed through |
 
-Never sent: the operator's token, the operator's email or claims, an `X-Plat5-Principal` without a member, the member's bindings or labels.
+Never sent: the operator's token, the operator's email or claims, an `X-Plat5-Principal` without a member, `X-Plat5-User-Id`, the member's bindings.
 
 ## Stripped
 
@@ -31,4 +31,4 @@ Never sent: the operator's token, the operator's email or claims, an `X-Plat5-Pr
 |--------|------|
 | `X-Plat5-Audit-Details` | Into the event's `details` |
 | `X-Plat5-Audit-Created` | Into the event's `created_id` |
-| `X-Plat5-Audit-Root`, `X-Plat5-Audit-Member` | Not read. Stripped |
+| `X-Plat5-Audit-Nodes`, `X-Plat5-Audit-Member` | Not read. Stripped |

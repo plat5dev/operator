@@ -302,7 +302,7 @@ func TestForward(t *testing.T) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
 		w.Header().Set(audit.CreatedHeader, "x_1")
-		w.Header().Set("X-Plat5-Audit-Root", orgID)
+		w.Header().Set("X-Plat5-Audit-Nodes", orgID)
 		w.Header().Set("X-Upstream", "yes")
 		w.WriteHeader(http.StatusTeapot)
 		_, _ = io.WriteString(w, `{"ok":true}`)

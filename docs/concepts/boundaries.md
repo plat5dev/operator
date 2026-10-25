@@ -6,7 +6,7 @@ What the operator plane is for, and what it won't do.
 
 Operator work on a Plat5 deployment's customers: browsing the tree, fixing data during an incident, restoring a deleted project, suspending a person, recovering an org that lost its last admin. Each of these is a call to a service's own API by node id, recorded in the operator audit log.
 
-Support that a customer should see and consent to is a binding in the customer's tree, not this plane: a support role with a `max_duration`, added by the customer (Plat5 `docs/decisions/access.md`). This plane is for what happens without the customer in the loop.
+Support that a customer should see and consent to is a binding in the customer's tree, not this plane: a support role the customer binds and removes again, since Plat5 bindings don't expire (Plat5 `docs/concepts/access.md`). This plane is for what happens without the customer in the loop.
 
 ## Not in the operator plane
 

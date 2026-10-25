@@ -2,7 +2,7 @@
 
 ## Next
 
-- **The operator console.** `template-operator-console` follows the route list here: the tree from `GET /nodes`, node pages by id, members by root, acting as a member, and the operator log by node. It still calls identity's earlier paths.
+- **The operator console.** `template-operator-console` follows the route list here: the tree from `GET /nodes`, node pages by id, members by root, acting as a member, and the operator log by node. Its identity calls aren't the ones this route list has.
 - **In `plat5 start`.** The CLI's local stack runs an operator module: this gateway, operator-audit, the operator IdP and their Postgres, on Plat5's network with `IDENTITY_URL` set. Plat5's `TODO.md` holds the same item.
 - **Starters' operator routes.** Each starter's `routes.operator.yml` lists its API's own paths by node id, with `node` and `as_member` where they apply ([`docs/reference/routes.md`](docs/reference/routes.md)), and `plat5 init` merges them under `services:`.
 - **Telemetry to Plat5's contract.** Plat5's log field names (`timestamp`, `message`), `http_requests_total` and `http_request_duration_seconds`, process metrics, and OTLP traces when `OTEL_EXPORTER_OTLP_ENDPOINT` is set (Plat5 `docs/reference/telemetry.md`).

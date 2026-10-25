@@ -31,7 +31,7 @@ Neither gateway calls the other. This gateway serves no UI, stores no accounts, 
 | Who is calling | An operator | A person or service account |
 | How the target is named | Node ids in the path: the service's own path | Slugs or ids in the edge path, rewritten to the service's path |
 | Who may call | Any authenticated operator, today ([`TODO.md`](../../TODO.md)) | The ancestor rule over the caller's bindings |
-| What the service is told | The path; the chain, when the route names a node; `X-Plat5-Operator-Id`; the member and its principal only when acting as one | The rewritten path, the chain, the member and its principal |
+| What the service is told | The path; the chain, when the route names a node; `X-Plat5-Operator-Id`; the member and its principal only when acting as one | The rewritten path, the chain, the member and its principal; on a user route, the user id |
 | Where it's recorded | The operator audit log | The tree's audit log |
 
 The operator is the actor. The path is the target. The service implements the action against the path. It may record who acted, from the headers, but it never decides access from them: access is the front door's.

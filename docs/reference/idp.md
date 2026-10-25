@@ -14,7 +14,7 @@ How a caller gets a token is the IdP's business. People typically use authorizat
 | `AUTH_OPERATOR_ID_CLAIM` | no | Dotted JSON path to the operator id. Default `sub` |
 | `AUTH_OPERATOR_EMAIL_CLAIM` | no | Dotted JSON path to the operator's email, recorded in the operator audit log. Default `email`. Absent in a token, the operator has no email |
 
-The audience is required, unlike at Plat5's gateway. An operator IdP issues tokens for many internal applications; without an audience check, a token for any of them would be an operator token.
+The audience is required, and there is no wildcard, unlike Plat5's gateway's `*`. An operator IdP issues tokens for many internal applications; without an audience check, a token for any of them would be an operator token.
 
 ## Token checks
 

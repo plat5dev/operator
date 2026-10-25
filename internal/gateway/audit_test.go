@@ -75,7 +75,7 @@ func TestAuditForwarded(t *testing.T) {
 		if rec.count() != 1 {
 			t.Error("the service was called before the intent was written")
 		}
-		w.Header().Set(audit.DetailsHeader, `{"label":"Apps"}`)
+		w.Header().Set(audit.DetailsHeader, `{"node_id":"01jbx9x9b1c3d5e7f9g1h3j5k7"}`)
 		w.Header().Set(audit.CreatedHeader, newNodeID)
 		w.WriteHeader(http.StatusCreated)
 		_, _ = io.WriteString(w, `{"id":"01jbx9x9b1c3d5e7f9g1h3j5k7"}`)
@@ -125,7 +125,7 @@ func TestAuditForwarded(t *testing.T) {
 	}
 
 	if out.Outcome != audit.Responded || *out.Status != 201 || out.ResponseBytes != int64(len(`{"id":"01jbx9x9b1c3d5e7f9g1h3j5k7"}`)) ||
-		string(out.Details) != `{"label":"Apps"}` || out.CreatedID == nil || *out.CreatedID != newNodeID {
+		string(out.Details) != `{"node_id":"01jbx9x9b1c3d5e7f9g1h3j5k7"}` || out.CreatedID == nil || *out.CreatedID != newNodeID {
 		t.Fatalf("outcome %+v details %s", out, out.Details)
 	}
 }

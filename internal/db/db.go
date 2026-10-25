@@ -198,15 +198,6 @@ func CheckWriter(ctx context.Context, pool *pgxpool.Pool) error {
 	if !applied {
 		return fmt.Errorf("migration %s is not applied; run operator-audit migrate first", LatestVersion())
 	}
-	// An earlier build's 001 has no chain. Its events can't be filled in: recreate the database.
-	var current bool
-	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns
-		WHERE table_schema = 'audit' AND table_name = 'audit_events' AND column_name = 'node_ids')`).Scan(&current); err != nil {
-		return err
-	}
-	if !current {
-		return errors.New("audit.audit_events was made by an earlier build's migration 001; recreate the database (docs/internals/audit-storage.md)")
-	}
 	var me string
 	var owns, canDelete, canTruncate, canInsert, canPartition bool
 	if err := pool.QueryRow(ctx, `

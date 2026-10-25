@@ -21,9 +21,9 @@ Google Cloud keeps a separate record of what its own people do to a customer's r
 |----------|-----|
 | The route node's chain, as `nodes` and `root_id`, the same shape as Plat5's events | "Every operator access to this org" is one filter on the chain, as Plat5 reads a tree's log by node (Plat5 `decisions/audit.md`). A console renders both logs with one component |
 | `acting_as` records the member and its principal | The member is who the service recorded as author. The event is where the operator and the member meet |
-| `service` names the route's service | Plat5's events and routes files call it `service`; one word for one thing |
+| `service` names the route's service | Plat5's audit events and service files call it `service`; one word for one thing |
 | `created_id` from `X-Plat5-Audit-Created`, as Plat5 records it | A service sends one set of audit headers to every front door |
-| `X-Plat5-Audit-Root` and `-Member` are dropped | They name a tree for a Plat5 sign-in route's log. This log isn't per tree |
+| `X-Plat5-Audit-Nodes` and `-Member` are dropped | They name a tree for a Plat5 user route's event. This log isn't per tree |
 | No authz decision field | Nothing decides yet. The field comes with the decision service |
 | `params` keep every path param, chain params included | Plat5 drops chain params because their values are in `nodes`; here the route's own param names are what an operator searches by |
 
@@ -32,4 +32,4 @@ Google Cloud keeps a separate record of what its own people do to a customer's r
 | Decision | Why |
 |----------|-----|
 | Monthly partitions, a GIN index on `node_ids` beside `nodes`, append-only by trigger, a writer role that can't delete | The same layout as Plat5's audit storage (Plat5 `internals/audit-storage.md`), for the same reasons: retention is dropping partitions, reads by node are an array containment |
-| One migration; an older database is recreated | Plat5 keeps one `001_init.sql` per service while it's early. An operator log from before the chain can't be filled in after the fact |
+| One migration | Plat5 keeps one `001_init.sql` per service while it's early |
