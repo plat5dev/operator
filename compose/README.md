@@ -4,11 +4,11 @@
 
 The gateway, Plat5 Auth as the staff IdP (`staff-auth`), an echo service that answers with the request it received, and the staff audit log: Postgres and operator-audit. `operator-audit-migrate` runs once as the schema owner; operator-audit serves as the writer role, which can't change or delete an event.
 
-The gateway reaches Plat5's identity and audit on Plat5's compose network, so start Plat5 first:
+The gateway reaches Plat5's identity and audit on Plat5's compose network, so start Plat5 first. Identity listens once Plat5 has a config applied (Plat5 `compose/README.md`); the [e2e](../e2e/README.md) applies one with kinds organization → project and Plat5's example roles, which the examples below use.
 
 ```bash
 # In the plat5 repo
-docker compose -f compose/docker-compose.yml up -d --build
+docker compose -f compose/docker-compose.yml up -d --build identity audit
 
 # Here
 docker compose up --build
@@ -35,13 +35,16 @@ op() { curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/j
 Make an org, add a person, and act as them:
 
 ```bash
-ORG=$(op -X POST http://localhost:5410/roots/organization -d '{"label":"Acme"}' | jq -r .id)
+ORG=$(op -X POST http://localhost:5410/roots/organization -d '{"display_name":"Acme"}' | jq -r .id)
 DANA=$(op -X POST http://localhost:5410/nodes/$ORG/members \
-  -d '{"idp":{"issuer":"http://localhost:5401","subject":"dana"}}' | jq -r .id)
+  -d '{"idp":{"issuer":"http://localhost:5401","subject":"dana"},"role":"member"}' | jq -r .id)
 
 # Created as Dana: she gets creator_role on the project.
-PROJECT=$(op -X POST http://localhost:5410/as/$DANA/nodes/$ORG/children/project -d '{"label":"Apps"}' | jq -r .id)
-op http://localhost:5410/nodes/$PROJECT/bindings | jq
+PROJECT=$(op -X POST http://localhost:5410/as/$DANA/nodes/$ORG/children/project -d '{"display_name":"Apps"}' | jq -r .id)
+op "http://localhost:5410/nodes/$PROJECT/bindings?inherited=false" | jq
+
+# The person behind the member.
+op http://localhost:5410/members/$DANA/user | jq
 
 # What a service is sent: the chain, the member, the operator. No credential.
 op http://localhost:5410/as/$DANA/nodes/$PROJECT/echo

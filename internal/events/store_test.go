@@ -73,7 +73,7 @@ func TestStoreWrites(t *testing.T) {
 	}
 
 	status := 200
-	createdID := "b_new"
+	createdID := "01jbzc1c2d3e4f5g6h7j8k9m0n"
 	applied, err := s.ApplyOutcome(ctx, "r1", &Outcome{Outcome: OutcomeResponded, Status: &status,
 		ResponseBytes: 42, Details: json.RawMessage(`{"role":{"from":"a","to":"b"}}`), CreatedID: &createdID})
 	if err != nil || !applied {
@@ -93,7 +93,7 @@ func TestStoreWrites(t *testing.T) {
 	e := list[0]
 	if e.Actor.OperatorID != "op_1" || e.Outcome != OutcomeResponded || *e.Status != 200 || *e.ResponseBytes != 42 ||
 		string(e.Details) != `{"role": {"to": "b", "from": "a"}}` || !e.OccurredAt.Equal(at.UTC().Truncate(time.Millisecond)) ||
-		*e.Actor.Email != "a@x.test" || e.Actor.ClientID != nil || e.Path != nil || *e.CreatedID != "b_new" ||
+		*e.Actor.Email != "a@x.test" || e.Actor.ClientID != nil || e.Path != nil || *e.CreatedID != "01jbzc1c2d3e4f5g6h7j8k9m0n" ||
 		*e.RootID != "org_1" || fmt.Sprint(e.Nodes) != "[{organization org_1} {project p_org_1}]" || e.ActingAs != nil {
 		t.Fatalf("%+v details %s", e, e.Details)
 	}
@@ -119,13 +119,13 @@ func TestStoreList(t *testing.T) {
 			in.Actor.OperatorID = "op_2"
 		}
 		if i == 3 {
-			in.ActingAs = &ActingAs{MemberID: "m_dana", Principal: "person"}
+			in.ActingAs = &ActingAs{MemberID: "01jbyb0d1e2f3g4h5j6k7m8n9p", Principal: "person"}
 		}
 		if _, err := s.CreateIntent(ctx, in); err != nil {
 			t.Fatal(err)
 		}
 	}
-	status, created := 201, "n_new"
+	status, created := 201, "01jbx9x9b1c3d5e7f9g1h3j5k7"
 	if _, err := s.ApplyOutcome(ctx, "r2", &Outcome{Outcome: OutcomeResponded, Status: &status, CreatedID: &created}); err != nil {
 		t.Fatal(err)
 	}
@@ -170,10 +170,10 @@ func TestStoreList(t *testing.T) {
 	if got, _ := ids(Filter{NodeID: "p_org_1"}); !eq(got, "r3", "r1") {
 		t.Fatalf("node below: %v", got)
 	}
-	if got, _ := ids(Filter{ActingAsMember: "m_dana"}); !eq(got, "r3") {
+	if got, _ := ids(Filter{ActingAsMember: "01jbyb0d1e2f3g4h5j6k7m8n9p"}); !eq(got, "r3") {
 		t.Fatalf("acting as: %v", got)
 	}
-	if got, _ := ids(Filter{CreatedID: "n_new"}); !eq(got, "r2") {
+	if got, _ := ids(Filter{CreatedID: "01jbx9x9b1c3d5e7f9g1h3j5k7"}); !eq(got, "r2") {
 		t.Fatalf("created: %v", got)
 	}
 	after, before := base.Add(time.Minute), base.Add(3*time.Minute)

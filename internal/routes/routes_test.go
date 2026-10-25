@@ -7,6 +7,13 @@ import (
 	"testing"
 )
 
+// Ids as Plat5 has them: lowercase ULIDs.
+const (
+	nodeID   = "01jbxa5m7n9p1q3r5s7t9v1w3x"
+	memberID = "01jbyb7g8h9j0k1m2n3p4q5r6s"
+	userID   = "01jbzc0r1s2t3v4w5x6y7z8a9b"
+)
+
 const valid = `
 services:
   identity:
@@ -139,20 +146,26 @@ func TestShippedFiles(t *testing.T) {
 		t.Errorf("compose/routes.yml lacks %s", k)
 	}
 
-	m := match(t, shipped, "GET", "/nodes/n_1/audit-events")
-	if m == nil || m.Route.Service() != "audit" || m.Route.Target().String() != "http://audit:3002" || m.NodeID() != "n_1" {
+	m := match(t, shipped, "GET", "/nodes/"+nodeID+"/audit-events")
+	if m == nil || m.Route.Service() != "audit" || m.Route.Target().String() != "http://audit:3002" || m.NodeID() != nodeID {
 		t.Fatalf("audit route: %+v", m)
 	}
-	if match(t, shipped, "POST", "/nodes/n_1/audit-events") != nil {
+	if match(t, shipped, "POST", "/nodes/"+nodeID+"/audit-events") != nil {
 		t.Fatal("Plat5 audit read must be GET only")
 	}
-	// Creating keys mints customer credentials: not routed.
-	for _, p := range []string{"/members/m_1/keys", "/nodes/n_1/service-accounts/m_1/keys"} {
+	if m := match(t, shipped, "GET", "/users/"+userID+"/audit-events"); m == nil || m.Route.Service() != "audit" || m.NodeID() != "" {
+		t.Fatalf("a person's audit route: %+v", m)
+	}
+	// Creating keys mints customer credentials: not routed. Listing and revoking are.
+	for _, p := range []string{"/users/" + userID + "/keys", "/nodes/" + nodeID + "/service-accounts/" + memberID + "/keys"} {
 		if match(t, shipped, "POST", p) != nil {
 			t.Errorf("POST %s is routed", p)
 		}
+		if match(t, shipped, "GET", p) == nil {
+			t.Errorf("GET %s is not routed", p)
+		}
 	}
-	if m := match(t, shipped, "POST", "/as/m_1/nodes/n_1/children/project"); m == nil || m.Member != "m_1" {
+	if m := match(t, shipped, "POST", "/as/"+memberID+"/nodes/"+nodeID+"/children/project"); m == nil || m.Member != memberID {
 		t.Fatalf("children as a member: %+v", m)
 	}
 }
@@ -191,19 +204,19 @@ func TestMatch(t *testing.T) {
 		member, node string
 	}{
 		{"GET", "/nodes", "/nodes", nil, "", ""},
-		{"GET", "/nodes/n_1/children/project", "/nodes/{node_id}/children/{kind}",
-			map[string]string{"node_id": "n_1", "kind": "project"}, "", "n_1"},
-		{"POST", "/as/m_1/nodes/n_1/children/project", "/as/{member}/nodes/{node_id}/children/{kind}",
-			map[string]string{"member": "m_1", "node_id": "n_1", "kind": "project"}, "m_1", "n_1"},
+		{"GET", "/nodes/" + nodeID + "/children/project", "/nodes/{node_id}/children/{kind}",
+			map[string]string{"node_id": nodeID, "kind": "project"}, "", nodeID},
+		{"POST", "/as/" + memberID + "/nodes/" + nodeID + "/children/project", "/as/{member}/nodes/{node_id}/children/{kind}",
+			map[string]string{"member": memberID, "node_id": nodeID, "kind": "project"}, memberID, nodeID},
 		{"POST", "/nodes/search", "/nodes/search", nil, "", ""},
 		{"GET", "/nodes/search", "/nodes/{node_id}", map[string]string{"node_id": "search"}, "", "search"},
 		{"GET", "/nodes/n%201", "/nodes/{node_id}", map[string]string{"node_id": "n 1"}, "", "n 1"},
 		// Only as_member routes are served under /as/.
-		{"GET", "/as/m_1/nodes/n_1", "", nil, "", ""},
-		{"GET", "/as/m_1/nodes", "", nil, "", ""},
-		{"GET", "/as/m_1", "", nil, "", ""},
-		{"DELETE", "/nodes/n_1", "", nil, "", ""},
-		{"GET", "/nodes/n_1/children/project/x", "", nil, "", ""},
+		{"GET", "/as/" + memberID + "/nodes/" + nodeID, "", nil, "", ""},
+		{"GET", "/as/" + memberID + "/nodes", "", nil, "", ""},
+		{"GET", "/as/" + memberID, "", nil, "", ""},
+		{"DELETE", "/nodes/" + nodeID, "", nil, "", ""},
+		{"GET", "/nodes/" + nodeID + "/children/project/x", "", nil, "", ""},
 		{"GET", "/users", "", nil, "", ""},
 		{"GET", "/", "", nil, "", ""},
 	}

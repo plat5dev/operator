@@ -5,6 +5,7 @@ package events
 import (
 	"crypto/rand"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -97,14 +98,15 @@ type Filter struct {
 	OccurredBefore *time.Time
 }
 
-// newID is a ULID on t: events sort by id in time order.
+// newID is a lowercase ULID on t, as Plat5's ids are: events sort by id in time order.
 func newID(t time.Time) string {
-	return ulid.MustNew(ulid.Timestamp(t), rand.Reader).String()
+	return strings.ToLower(ulid.MustNew(ulid.Timestamp(t), rand.Reader).String())
 }
 
+// validID is a lowercase ULID. An uppercase one isn't canonical and matches nothing.
 func validID(s string) bool {
 	_, err := ulid.ParseStrict(s)
-	return err == nil
+	return err == nil && s == strings.ToLower(s)
 }
 
 // idTime is the millisecond an id was made for.

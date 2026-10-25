@@ -71,7 +71,7 @@ func TestMigrateAndRoles(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := writer.Exec(ctx, `INSERT INTO audit_events (id, occurred_at, request_id, actor_issuer,
-		actor_operator_id, service, method, route, ip) VALUES ('01JA2Z6Q3Y8D5V2K9N4R7T1W0X', $1, 'r1', 'i', 'o',
+		actor_operator_id, service, method, route, ip) VALUES ('01ja2z6q3y8d5v2k9n4r7t1w0x', $1, 'r1', 'i', 'o',
 		'identity', 'GET', '/nodes', '10.0.0.1')`, at); err != nil {
 		t.Fatal(err)
 	}

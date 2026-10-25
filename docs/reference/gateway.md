@@ -9,7 +9,7 @@ On a route with `node`, this gateway calls Plat5 identity's public service API a
 | Call | For | Answer |
 |------|-----|--------|
 | `GET /nodes/{node_id}` | The route node, then each `parent_id` up to the root | **404**: not found. The route node missing is **404** to the client; an ancestor missing is identity failing |
-| `GET /nodes/{root_id}/members/{member}` | Acting as a member | `status: active` passes. **404**, or any other status, is a member not active in the tree (**400** to the client) |
+| `GET /nodes/{root_id}/members/{member_id}` | Acting as a member, the member from `/as/{member}` | `status: active` passes. **404**, or any other status, is a member not active in the tree (**400** to the client) |
 
 Any other answer, a timeout (2 seconds per call), or a transport error is identity unreachable: **503**.
 

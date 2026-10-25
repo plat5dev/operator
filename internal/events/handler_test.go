@@ -162,10 +162,10 @@ func TestList(t *testing.T) {
 			t.Errorf("%s = %v, want null", k, v)
 		}
 	}
-	if e["service"] != "identity" || e["root_id"] != "n_org" || len(e["nodes"].([]any)) != 2 {
+	if e["service"] != "identity" || e["root_id"] != "01jbx9q3t5vk8m2n4p6r7s8t9w" || len(e["nodes"].([]any)) != 2 {
 		t.Fatalf("%v", e)
 	}
-	if a := e["acting_as"].(map[string]any); a["member_id"] != "m_dana" || a["principal"] != "person" {
+	if a := e["acting_as"].(map[string]any); a["member_id"] != "01jbyb0d1e2f3g4h5j6k7m8n9p" || a["principal"] != "person" {
 		t.Fatalf("acting_as %v", a)
 	}
 	if _, ok := e["decision"]; ok {

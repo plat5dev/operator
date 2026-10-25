@@ -20,7 +20,7 @@ services:
         node: node_id
         as_member: true
         methods: [GET, POST]
-      - path: /members/{member_id}/status
+      - path: /users/{user_id}/status
         methods: [PATCH]
   e10s:
     url: http://e10s:3000

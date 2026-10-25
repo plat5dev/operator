@@ -32,17 +32,17 @@ A route that addresses a Plat5 node names the param holding it (`node`, [`refere
 - **Not found** → **404** `NOT_FOUND`. Deleted and purged nodes are found: their chain is sent like any other, and the service applies its own state rules. Restoring a deleted node goes through here.
 - **Nothing else is checked.** The node's status, kind and the operator's reach are not this gateway's to judge.
 
-A route without `node` is forwarded with no chain, as a Plat5 sign-in route is: `GET /nodes`, `/members/{member_id}/…`, `/roots/{kind}`.
+A route without `node` is forwarded with no chain, as a Plat5 user route is: `GET /nodes`, `/users/{user_id}/…`, `/members/{member_id}/user`, `/roots/{kind}`.
 
 ## Acting as a member
 
 A service that records authors needs `X-Plat5-Member-Id` (Plat5 `docs/guides/write-a-service.md`). An operator supplies one by acting as a member, and only that way: the path says so.
 
 ```
-POST /as/m_01J…/nodes/n_01J…/children/project
-→ POST /nodes/n_01J…/children/project
-  X-Plat5-Organization-Id: n_01J…
-  X-Plat5-Member-Id: m_01J…
+POST /as/01jbyb0d…/nodes/01jbx9q3…/children/project
+→ POST /nodes/01jbx9q3…/children/project
+  X-Plat5-Organization-Id: 01jbx9q3…
+  X-Plat5-Member-Id: 01jbyb0d…
   X-Plat5-Principal: person
   X-Plat5-Operator-Id: 00u1abc
 ```
@@ -53,7 +53,7 @@ POST /as/m_01J…/nodes/n_01J…/children/project
 - **Access is the operator's, never the member's.** The member's bindings and labels are never read or applied. A filtered list asked as a member shows what that member can read.
 - **Both are recorded.** The staff audit log has the operator as the actor and the member as `acting_as` ([`concepts/audit.md`](audit.md)).
 
-Without `/as/`, a request carries no member id and no principal. A service that needs one refuses it as malformed; that's correct, and the operator retries as a member if the change should be authored. Identity's own filtered lists answer **400** without one; `GET /nodes` is the unfiltered tree browser.
+Without `/as/`, a request carries no member id and no principal. A service that needs one refuses it as malformed; that's correct, and the operator retries as a member if the change should be authored. Identity's filtered lists are the full list without one, as `GET /nodes` is.
 
 ## Forwarding
 

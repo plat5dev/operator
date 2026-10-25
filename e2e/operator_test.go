@@ -49,6 +49,7 @@ func setup(t *testing.T) *operator {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(wait)
+	o.applyConfig(deadline)
 	for {
 		o.token, err = o.mint()
 		if err == nil {
@@ -64,6 +65,65 @@ func setup(t *testing.T) *operator {
 		}
 		time.Sleep(2 * time.Second)
 	}
+}
+
+// applyConfig applies testdata/config.json through Plat5's control plane, as Plat5's own
+// e2e does: a dry run for the plan's revision, then the apply with it as expect. Identity
+// listens only once a config is applied. A plan with no changes applies nothing.
+func (o *operator) applyConfig(deadline time.Time) {
+	o.t.Helper()
+	raw, err := os.ReadFile("testdata/config.json")
+	if err != nil {
+		o.t.Fatal(err)
+	}
+	var config map[string]any
+	if err := json.Unmarshal(raw, &config); err != nil {
+		o.t.Fatal(err)
+	}
+	var plan struct {
+		Revision int   `json:"revision"`
+		Changes  []any `json:"changes"`
+	}
+	for {
+		status, body, err := o.admin("/apply?dry_run=true", config)
+		if err == nil && status == http.StatusOK {
+			if err := json.Unmarshal(body, &plan); err != nil {
+				o.t.Fatalf("plan: %v: %s", err, body)
+			}
+			break
+		}
+		if err == nil && status != http.StatusServiceUnavailable {
+			o.t.Fatalf("dry run: %d %s", status, body)
+		}
+		if time.Now().After(deadline) {
+			o.t.Fatalf("control plane not ready: %v %d %s", err, status, body)
+		}
+		time.Sleep(2 * time.Second)
+	}
+	if len(plan.Changes) == 0 {
+		return
+	}
+	config["expect"] = map[string]int{"revision": plan.Revision}
+	if status, body, err := o.admin("/apply", config); err != nil || status != http.StatusOK {
+		o.t.Fatalf("apply: %v %d %s", err, status, body)
+	}
+}
+
+func (o *operator) admin(path string, body any) (int, []byte, error) {
+	b, _ := json.Marshal(body)
+	req, err := http.NewRequest("POST", env("CONTROL_PLANE_URL", "http://localhost:5402")+path, bytes.NewReader(b))
+	if err != nil {
+		return 0, nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+env("ADMIN_TOKEN", "dev-admin-token"))
+	res, err := o.http.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer res.Body.Close()
+	out, err := io.ReadAll(res.Body)
+	return res.StatusCode, out, err
 }
 
 // mint gets a staff token from Plat5 Auth's dev mode.
@@ -102,7 +162,7 @@ func (o *operator) call(method, path string, body any) response {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	// A client can't name a member, a node or an operator.
-	req.Header.Set("X-Plat5-Member-Id", "m_forged")
+	req.Header.Set("X-Plat5-Member-Id", forgedMemberID)
 	req.Header.Set("X-Plat5-Operator-Id", "forged")
 	res, err := o.http.Do(req)
 	if err != nil {
@@ -124,6 +184,9 @@ func (o *operator) must(want int, method, path string, body any) response {
 	}
 	return r
 }
+
+// forgedMemberID is what a client sends as X-Plat5-Member-Id. It never reaches a service.
+const forgedMemberID = "01jbyb5j6k7m8n9p0q1r2s3t4v"
 
 func str(m map[string]any, key string) string {
 	s, _ := m[key].(string)
@@ -153,10 +216,9 @@ func TestOperator(t *testing.T) {
 	suffix := fmt.Sprint(time.Now().UnixNano())
 
 	// An org made by staff has no member behind it.
-	org := str(o.must(201, "POST", "/roots/organization", map[string]any{"label": "E2E " + suffix}).body, "id")
-	dana := str(o.must(201, "POST", "/nodes/"+org+"/members", map[string]any{
-		"idp": map[string]any{"issuer": "http://localhost:5401", "subject": "e2e-dana-" + suffix},
-	}).body, "id")
+	org := str(o.must(201, "POST", "/roots/organization", map[string]any{"display_name": "E2E " + suffix}).body, "id")
+	danaIdP := map[string]any{"issuer": "http://localhost:5401", "subject": "e2e-dana-" + suffix}
+	dana := str(o.must(201, "POST", "/nodes/"+org+"/members", map[string]any{"idp": danaIdP, "role": "member"}).body, "id")
 
 	// The tree, unfiltered, and a node by id.
 	if len(list(o.must(200, "GET", "/nodes?kind=organization", nil), "nodes")) == 0 {
@@ -167,28 +229,34 @@ func TestOperator(t *testing.T) {
 	}
 
 	t.Run("acting as a member authors the write", func(t *testing.T) {
-		project := str(o.must(201, "POST", "/as/"+dana+"/nodes/"+org+"/children/project", map[string]any{"label": "Apps"}).body, "id")
+		project := str(o.must(201, "POST", "/as/"+dana+"/nodes/"+org+"/children/project", map[string]any{"display_name": "Apps"}).body, "id")
 		var found bool
-		for _, b := range list(o.must(200, "GET", "/nodes/"+project+"/bindings", nil), "bindings") {
-			if str(b, "member") == dana && str(b, "role") == "owner" {
+		for _, b := range list(o.must(200, "GET", "/nodes/"+project+"/bindings?inherited=false", nil), "bindings") {
+			if str(b, "member_id") == dana && str(b, "role") == "admin" {
 				found = true
 			}
 		}
 		if !found {
 			t.Fatal("the member acted as didn't get creator_role on the new project")
 		}
-
-		// A filtered list, as the member: what Dana can read.
-		if !ids(list(o.must(200, "GET", "/as/"+dana+"/nodes/"+org+"/children/project", nil), "nodes"))[project] {
-			t.Fatal("Dana can't see her project")
+		// Her org's role and her project's, as identity resolves them.
+		perms, _ := o.must(200, "GET", "/nodes/"+project+"/memberships/"+dana, nil).body["permissions"].([]any)
+		if fmt.Sprint(perms) != "[* organization:read]" {
+			t.Fatalf("Dana's permissions on her project: %v", perms)
 		}
-		// Without a member, identity refuses the filtered list.
-		o.must(400, "GET", "/nodes/"+org+"/children/project", nil)
 
 		// Created by staff alone: no member, so no binding.
-		bare := str(o.must(201, "POST", "/nodes/"+org+"/children/project", map[string]any{"label": "Bare"}).body, "id")
-		if b := list(o.must(200, "GET", "/nodes/"+bare+"/bindings", nil), "bindings"); len(b) != 0 {
+		bare := str(o.must(201, "POST", "/nodes/"+org+"/children/project", map[string]any{"display_name": "Bare"}).body, "id")
+		if b := list(o.must(200, "GET", "/nodes/"+bare+"/bindings?inherited=false", nil), "bindings"); len(b) != 0 {
 			t.Fatalf("bindings on a project staff made: %v", b)
+		}
+
+		// A filtered list, as the member: what Dana can read. Without a member, the full list.
+		if seen := ids(list(o.must(200, "GET", "/as/"+dana+"/nodes/"+org+"/children/project", nil), "nodes")); !seen[project] || seen[bare] {
+			t.Fatalf("Dana sees %v", seen)
+		}
+		if seen := ids(list(o.must(200, "GET", "/nodes/"+org+"/children/project", nil), "nodes")); !seen[project] || !seen[bare] {
+			t.Fatalf("the full list is %v", seen)
 		}
 
 		events := list(o.must(200, "GET", "/operator-audit-events?acting_as_member_id="+dana+"&method=POST", nil), "audit_events")
@@ -204,8 +272,25 @@ func TestOperator(t *testing.T) {
 		}
 	})
 
+	t.Run("a person, from their member", func(t *testing.T) {
+		user := str(o.must(200, "GET", "/members/"+dana+"/user", nil).body, "id")
+		q := url.Values{"issuer": {str(danaIdP, "issuer")}, "subject": {str(danaIdP, "subject")}}
+		if found := list(o.must(200, "GET", "/users?"+q.Encode(), nil), "users"); len(found) != 1 || str(found[0], "id") != user {
+			t.Fatalf("by IdP link: %v", found)
+		}
+		if str(o.must(200, "GET", "/users/"+user, nil).body, "status") != "active" {
+			t.Fatal("Dana isn't active")
+		}
+		if !ids(list(o.must(200, "GET", "/users/"+user+"/nodes?kind=organization", nil), "nodes"))[org] {
+			t.Fatal("Dana's orgs lack hers")
+		}
+		if _, ok := o.must(200, "GET", "/users/"+user+"/audit-events", nil).body["audit_events"]; !ok {
+			t.Fatal("no audit_events in a person's log")
+		}
+	})
+
 	t.Run("services get the chain, the member and the operator", func(t *testing.T) {
-		project := str(o.must(201, "POST", "/as/"+dana+"/nodes/"+org+"/children/project", map[string]any{"label": "Echo"}).body, "id")
+		project := str(o.must(201, "POST", "/as/"+dana+"/nodes/"+org+"/children/project", map[string]any{"display_name": "Echo"}).body, "id")
 		r := o.must(200, "GET", "/as/"+dana+"/nodes/"+project+"/echo", nil)
 		// whoami prints the request line and headers it received.
 		for _, want := range []string{
@@ -219,7 +304,7 @@ func TestOperator(t *testing.T) {
 				t.Errorf("echo lacks %q:\n%s", want, r.raw)
 			}
 		}
-		for _, never := range []string{"Authorization:", "m_forged", "X-Plat5-Operator-Id: forged"} {
+		for _, never := range []string{"Authorization:", forgedMemberID, "X-Plat5-Operator-Id: forged"} {
 			if strings.Contains(r.raw, never) {
 				t.Errorf("echo has %q:\n%s", never, r.raw)
 			}
@@ -237,14 +322,15 @@ func TestOperator(t *testing.T) {
 	})
 
 	t.Run("a member must be active in the node's tree", func(t *testing.T) {
-		other := str(o.must(201, "POST", "/roots/organization", map[string]any{"label": "Other " + suffix}).body, "id")
-		o.must(400, "POST", "/as/"+dana+"/nodes/"+other+"/children/project", map[string]any{"label": "Nope"})
+		other := str(o.must(201, "POST", "/roots/organization", map[string]any{"display_name": "Other " + suffix}).body, "id")
+		o.must(400, "POST", "/as/"+dana+"/nodes/"+other+"/children/project", map[string]any{"display_name": "Nope"})
 
 		gone := str(o.must(201, "POST", "/nodes/"+org+"/members", map[string]any{
-			"idp": map[string]any{"issuer": "http://localhost:5401", "subject": "e2e-gone-" + suffix},
+			"idp":  map[string]any{"issuer": "http://localhost:5401", "subject": "e2e-gone-" + suffix},
+			"role": "member",
 		}).body, "id")
 		o.must(204, "DELETE", "/nodes/"+org+"/members/"+gone, nil)
-		o.must(400, "POST", "/as/"+gone+"/nodes/"+org+"/children/project", map[string]any{"label": "Nope"})
+		o.must(400, "POST", "/as/"+gone+"/nodes/"+org+"/children/project", map[string]any{"display_name": "Nope"})
 
 		events := list(o.must(200, "GET", "/operator-audit-events?params%5Bmember%5D="+gone, nil), "audit_events")
 		if len(events) != 1 || str(events[0], "outcome") != "rejected" || events[0]["acting_as"] != nil ||
@@ -254,7 +340,7 @@ func TestOperator(t *testing.T) {
 	})
 
 	t.Run("delete and restore a project", func(t *testing.T) {
-		project := str(o.must(201, "POST", "/as/"+dana+"/nodes/"+org+"/children/project", map[string]any{"label": "Doomed"}).body, "id")
+		project := str(o.must(201, "POST", "/as/"+dana+"/nodes/"+org+"/children/project", map[string]any{"display_name": "Doomed"}).body, "id")
 		o.must(204, "DELETE", "/nodes/"+project, nil)
 		deleted := o.must(200, "GET", "/nodes?parent_id="+org+"&status=deleted", nil)
 		if !ids(list(deleted, "nodes"))[project] {
@@ -266,7 +352,7 @@ func TestOperator(t *testing.T) {
 	})
 
 	t.Run("a node that isn't there", func(t *testing.T) {
-		r := o.must(404, "GET", "/nodes/n_01AAAAAAAAAAAAAAAAAAAAAAAA", nil)
+		r := o.must(404, "GET", "/nodes/01aaaaaaaaaaaaaaaaaaaaaaaa", nil)
 		details, _ := r.body["error"].(map[string]any)["details"].(map[string]any)
 		if str(details, "resource") != "node" {
 			t.Fatalf("%s", r.raw)
@@ -291,6 +377,10 @@ func TestOperator(t *testing.T) {
 				t.Errorf("no event for %s under the org", want)
 			}
 		}
+	})
+
+	t.Run("a slug is released only from a purged root", func(t *testing.T) {
+		o.must(409, "POST", "/nodes/"+org+"/release-slug", nil)
 	})
 
 	t.Run("Plat5's audit reads go through", func(t *testing.T) {

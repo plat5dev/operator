@@ -67,17 +67,17 @@ func writer(t *testing.T, url string) (*Writer, *metrics.Registry) {
 func intent() *Intent {
 	route := "/nodes/{node_id}"
 	service := "identity"
-	root := "n_org"
+	root := "01jbx9q3t5vk8m2n4p6r7s8t9w"
 	return &Intent{
 		RequestID:  "req1",
 		OccurredAt: Timestamp(time.Now()),
 		Actor:      Actor{Issuer: "https://idp.test", OperatorID: "op_1"},
 		RootID:     &root,
-		Nodes:      []Node{{Kind: "organization", ID: "n_org"}},
+		Nodes:      []Node{{Kind: "organization", ID: "01jbx9q3t5vk8m2n4p6r7s8t9w"}},
 		Service:    &service,
 		Method:     "GET",
 		Route:      &route,
-		Params:     map[string]string{"node_id": "n_org"},
+		Params:     map[string]string{"node_id": "01jbx9q3t5vk8m2n4p6r7s8t9w"},
 		IP:         "127.0.0.1",
 	}
 }
@@ -311,7 +311,7 @@ func scrape(reg *metrics.Registry) string {
 }
 
 func TestParseCreated(t *testing.T) {
-	for _, ok := range []string{"n_01J", "ver_01JA2Z6R", strings.Repeat("a", MaxCreatedLen)} {
+	for _, ok := range []string{"01ja2z6q3y8d5v2k9n4r7t1w0x", "ver_01ja2z6r", strings.Repeat("a", MaxCreatedLen)} {
 		if id, good := ParseCreated([]string{ok}); !good || *id != ok {
 			t.Errorf("%q refused", ok)
 		}
@@ -324,9 +324,9 @@ func TestParseCreated(t *testing.T) {
 			t.Errorf("%q accepted", bad)
 		}
 	}
-	created := "n_new"
+	created := "01jbx9x9b1c3d5e7f9g1h3j5k7"
 	b, _ := json.Marshal(OutcomeFor(&State{Forwarded: true, UpstreamStatus: 201, CreatedID: &created}, 201, 2))
-	if string(b) != `{"outcome":"responded","status":201,"response_bytes":2,"details":null,"created_id":"n_new"}` {
+	if string(b) != `{"outcome":"responded","status":201,"response_bytes":2,"details":null,"created_id":"01jbx9x9b1c3d5e7f9g1h3j5k7"}` {
 		t.Fatalf("%s", b)
 	}
 	// Only a response names what it created.
