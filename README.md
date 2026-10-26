@@ -8,6 +8,8 @@ Not part of the plat5 repo, and imports none of its code. Doesn't call Plat5's g
 
 Contract: [`docs/`](docs/README.md). How to work here: [`AGENTS.md`](AGENTS.md). Next and deferred: [`TODO.md`](TODO.md). Run it: [`compose/`](compose/README.md).
 
+In a Plat5 project, `plat5 start` runs it locally as the CLI's operator module: this gateway at `:5410` on the project's `operator.routes.yml`, operator-audit, an operator IdP at `:5411` and the operator console at `:5412`, on Plat5's network ([cli: what `plat5 start` runs](https://github.com/plat5dev/cli#what-plat5-start-runs)). To run this checkout there, see [building from checkouts](https://github.com/plat5dev/cli#contributors-build-from-checkouts). On its own:
+
 ```bash
 # With Plat5's compose running (compose/README.md)
 cd compose

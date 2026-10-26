@@ -1,5 +1,7 @@
 # Compose
 
+In a Plat5 project, `plat5 start` runs operator for you: its operator module runs these images on the project's Postgres and Plat5's network, with an operator IdP and the operator console ([cli: what `plat5 start` runs](https://github.com/plat5dev/cli#what-plat5-start-runs)). The files here run operator on its own: dev beside Plat5's compose, and prod.
+
 ## Dev
 
 The gateway, Plat5 Auth as the operator IdP (`operator-auth`), an echo service that answers with the request it received, and the operator audit log: Postgres and operator-audit. `operator-audit-migrate` runs once as the schema owner; operator-audit serves as the writer role, which can't change or delete an event.
