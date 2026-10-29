@@ -6,7 +6,7 @@ In a Plat5 project, `plat5 start` runs operator for you: its operator module run
 
 The gateway, Plat5 Auth as the operator IdP (`operator-auth`), an echo service that answers with the request it received, and the operator audit log: Postgres and operator-audit. `operator-audit-migrate` runs once as the schema owner; operator-audit serves as the writer role, which can't change or delete an event.
 
-The gateway reaches Plat5's identity and audit on Plat5's compose network, so start Plat5 first. Identity listens once Plat5 has a config applied (Plat5 `compose/README.md`); the [e2e](../e2e/README.md) applies one with kinds organization → project and Plat5's example roles, which the examples below use.
+The gateway reaches Plat5's identity and audit on Plat5's compose network, so start Plat5 first. Identity listens once Plat5 has a config applied (Plat5 `compose/README.md`); the [e2e](../e2e/README.md) applies Plat5's e2e config with operator's additions, which the examples below use.
 
 ```bash
 # In the plat5 repo

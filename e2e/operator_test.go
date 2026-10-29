@@ -67,17 +67,14 @@ func setup(t *testing.T) *operator {
 	}
 }
 
-// applyConfig applies testdata/config.json through Plat5's control plane, as Plat5's own
-// e2e does: a dry run for the plan's revision, then the apply with it as expect. Identity
-// listens only once a config is applied. A plan with no changes applies nothing.
+// applyConfig applies Plat5's e2e config with operator's additions (config_test.go) through
+// Plat5's control plane, as Plat5's own e2e does: a dry run for the plan's revision, then
+// the apply with it as expect. Identity listens only once a config is applied. A plan with
+// no changes applies nothing.
 func (o *operator) applyConfig(deadline time.Time) {
 	o.t.Helper()
-	raw, err := os.ReadFile("testdata/config.json")
+	config, err := loadConfig(plat5Dir(), additionsConfig)
 	if err != nil {
-		o.t.Fatal(err)
-	}
-	var config map[string]any
-	if err := json.Unmarshal(raw, &config); err != nil {
 		o.t.Fatal(err)
 	}
 	var plan struct {
