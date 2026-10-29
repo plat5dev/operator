@@ -76,7 +76,7 @@ Param names are unique within a path and match `[a-z][a-z0-9_]*`. `member` is re
 
 The image's `/routes.yml` is this repo's [`routes.yml`](../../routes.yml): Plat5 identity's service API for other front doors, Plat5's audit reads by node and by person, and the operator audit log read, at the addresses of Plat5's compose. A deployment mounts its own copy with its addresses and its services' routes.
 
-Left out on purpose: creating keys (`POST …/keys`), which mints customer credentials. Identity's other routes are in.
+Left out on purpose: creating keys (`POST …/keys`), which mints customer credentials. Identity's other routes are in, among them `PATCH /users/{user_id}`, which sets or clears a person's name (`{ "name": "…" }` or `{ "name": null }`). This gateway never sends `X-Plat5-User-Id` ([headers](headers.md)), so identity takes it as an operator's edit, allowed whatever `users.name.sync` says (Plat5 `docs/reference/idp.md#a-persons-name`).
 
 ## Reserved
 

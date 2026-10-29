@@ -1,7 +1,6 @@
 {
   "deletion_grace": "30d",
   "reserved_slugs": ["new", "settings", "api", "admin"],
-  "users": { "name_claim": "name" },
   "kinds": {
     "organization": { "path": "/orgs/{organization}", "list_permission": "organization:read" },
     "project": { "parent": "organization", "path": "/projects/{project}", "list_permission": "project:read" }

@@ -287,6 +287,24 @@ func TestOperator(t *testing.T) {
 		if _, ok := o.must(200, "GET", "/users/"+user+"/audit-events", nil).body["audit_events"]; !ok {
 			t.Fatal("no audit_events in a person's log")
 		}
+
+		// An operator sets the person's name, trimmed, then clears it.
+		if got := o.must(200, "PATCH", "/users/"+user, map[string]any{"name": "  Dana Scully  "}).body["name"]; got != "Dana Scully" {
+			t.Fatalf("name after set: %v", got)
+		}
+		if got := o.must(200, "GET", "/users/"+user, nil).body["name"]; got != "Dana Scully" {
+			t.Fatalf("name read back: %v", got)
+		}
+		if body := o.must(200, "PATCH", "/users/"+user, map[string]any{"name": nil}).body; body["name"] != nil {
+			t.Fatalf("name after clear: %v", body["name"])
+		}
+		if body := o.must(200, "GET", "/users/"+user, nil).body; body["name"] != nil {
+			t.Fatalf("name read back after clear: %v", body["name"])
+		}
+		q = url.Values{"method": {"PATCH"}, "route": {"/users/{user_id}"}, "params[user_id]": {user}}
+		if events := list(o.must(200, "GET", "/operator-audit-events?"+q.Encode(), nil), "audit_events"); len(events) != 2 {
+			t.Fatalf("%d operator audit events for the name edits", len(events))
+		}
 	})
 
 	t.Run("services get the chain, the member and the operator", func(t *testing.T) {
