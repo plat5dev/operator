@@ -2,7 +2,7 @@
 
 Tests that drive the operator gateway against a running Plat5 stack: the tree by id, acting as a member, the chain sent to services, restore, and the operator audit log by node. Opt-in: they skip unless `OPERATOR_E2E=1`. Their own module, so the gateway's build never depends on them.
 
-A fresh Plat5 stack has no config, and identity doesn't listen until it has one. The tests apply a config through Plat5's control plane first, as Plat5's own e2e does: a dry run, then the apply with the plan's revision. A rerun applies nothing.
+A fresh Plat5 stack has no config, and identity doesn't listen until it has one. The tests apply a config through Plat5's control plane first, as Plat5's own e2e does: a dry run, then the apply with the plan's revision. A rerun applies nothing. One test applies the same config with `users.name.sync: each_sign_in`, to see identity refuse an operator's name edit, then applies the config again.
 
 The config is built when the tests run: Plat5's e2e config, `e2e/testdata/config.json` in the plat5 repo, with operator's additions, [`testdata/additions.json`](testdata/additions.json), merged in. The plat5 repo is `../plat5` beside this repo, or `PLAT5_DIR`. Without it the tests fail and name the path they looked for.
 

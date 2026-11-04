@@ -49,7 +49,7 @@ func setup(t *testing.T) *operator {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(wait)
-	o.applyConfig(deadline)
+	o.apply(o.config(), deadline)
 	for {
 		o.token, err = o.mint()
 		if err == nil {
@@ -67,16 +67,21 @@ func setup(t *testing.T) *operator {
 	}
 }
 
-// applyConfig applies Plat5's e2e config with operator's additions (config_test.go) through
-// Plat5's control plane, as Plat5's own e2e does: a dry run for the plan's revision, then
-// the apply with it as expect. Identity listens only once a config is applied. A plan with
-// no changes applies nothing.
-func (o *operator) applyConfig(deadline time.Time) {
+// config is Plat5's e2e config with operator's additions (config_test.go), fresh each call.
+func (o *operator) config() map[string]any {
 	o.t.Helper()
 	config, err := loadConfig(plat5Dir(), additionsConfig)
 	if err != nil {
 		o.t.Fatal(err)
 	}
+	return config
+}
+
+// apply applies a config through Plat5's control plane, as Plat5's own e2e does: a dry run
+// for the plan's revision, then the apply with it as expect. Identity listens only once a
+// config is applied. A plan with no changes applies nothing.
+func (o *operator) apply(config map[string]any, deadline time.Time) {
+	o.t.Helper()
 	var plan struct {
 		Revision int   `json:"revision"`
 		Changes  []any `json:"changes"`
@@ -172,6 +177,23 @@ func (o *operator) call(method, path string, body any) response {
 	return out
 }
 
+// until calls every half second until done, for up to 30 seconds: identity takes a newly
+// applied config shortly after the apply.
+func (o *operator) until(done func(response) bool, method, path string, body any) response {
+	o.t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		r := o.call(method, path, body)
+		if done(r) {
+			return r
+		}
+		if time.Now().After(deadline) {
+			o.t.Fatalf("%s %s: still %d after 30s: %s", method, path, r.status, r.raw)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
 // must calls and fails unless the status is want.
 func (o *operator) must(want int, method, path string, body any) response {
 	o.t.Helper()
@@ -180,6 +202,12 @@ func (o *operator) must(want int, method, path string, body any) response {
 		o.t.Fatalf("%s %s: %d, want %d: %s", method, path, r.status, want, r.raw)
 	}
 	return r
+}
+
+// code is the error code of an error response.
+func code(r response) string {
+	e, _ := r.body["error"].(map[string]any)
+	return str(e, "code")
 }
 
 // forgedMemberID is what a client sends as X-Plat5-Member-Id. It never reaches a service.
@@ -304,6 +332,33 @@ func TestOperator(t *testing.T) {
 		}
 	})
 
+	// users.name.sync each_sign_in applied through the control plane, then the e2e config
+	// again: the IdP owns names, and an operator's edit is refused like anyone's.
+	t.Run("under each_sign_in an operator can't edit a name", func(t *testing.T) {
+		user := str(o.must(200, "GET", "/members/"+dana+"/user", nil).body, "id")
+		each := o.config()
+		users, _ := each["users"].(map[string]any)
+		name, _ := users["name"].(map[string]any)
+		if name == nil {
+			t.Fatalf("no users.name in the e2e config: %v", each["users"])
+		}
+		name["sync"] = "each_sign_in"
+		o.apply(each, time.Now().Add(time.Minute))
+		t.Cleanup(func() {
+			o.apply(o.config(), time.Now().Add(time.Minute))
+			o.until(func(r response) bool { return r.status == 200 }, "PATCH", "/users/"+user, map[string]any{"name": nil})
+		})
+
+		// Refused once identity has the new config.
+		r := o.until(func(r response) bool { return r.status == 409 }, "PATCH", "/users/"+user, map[string]any{"name": "Dana Scully"})
+		if code(r) != "NAME_OWNED_BY_IDP" {
+			t.Fatalf("set: %s", r.raw)
+		}
+		if r := o.must(409, "PATCH", "/users/"+user, map[string]any{"name": nil}); code(r) != "NAME_OWNED_BY_IDP" {
+			t.Fatalf("clear: %s", r.raw)
+		}
+	})
+
 	t.Run("services get the chain, the member and the operator", func(t *testing.T) {
 		project := str(o.must(201, "POST", "/as/"+dana+"/nodes/"+org+"/children/project", map[string]any{"display_name": "Echo"}).body, "id")
 		r := o.must(200, "GET", "/as/"+dana+"/nodes/"+project+"/echo", nil)
@@ -395,7 +450,9 @@ func TestOperator(t *testing.T) {
 	})
 
 	t.Run("a slug is released only from a purged root", func(t *testing.T) {
-		o.must(409, "POST", "/nodes/"+org+"/release-slug", nil)
+		if r := o.must(409, "POST", "/nodes/"+org+"/release-slug", nil); code(r) != "SLUG_NOT_RELEASABLE" {
+			t.Fatalf("%s", r.raw)
+		}
 	})
 
 	t.Run("Plat5's audit reads go through", func(t *testing.T) {
