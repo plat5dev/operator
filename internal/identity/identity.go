@@ -104,7 +104,7 @@ func (c *Client) place(ctx context.Context, id, requestID string) (place, error)
 	switch {
 	case err != nil:
 		return place{}, err
-	case status == http.StatusNotFound, status == http.StatusBadRequest, status == http.StatusUnprocessableEntity:
+	case status == http.StatusNotFound:
 		return place{}, ErrNotFound
 	case status != http.StatusOK:
 		return place{}, fmt.Errorf("%w: GET /nodes/%s answered %d", ErrUnavailable, id, status)
@@ -137,7 +137,7 @@ func (c *Client) Member(ctx context.Context, rootID, memberID, requestID string)
 	switch {
 	case err != nil:
 		return "", err
-	case status == http.StatusNotFound, status == http.StatusBadRequest, status == http.StatusUnprocessableEntity:
+	case status == http.StatusNotFound:
 		return "", ErrNotActive
 	case status != http.StatusOK:
 		return "", fmt.Errorf("%w: member lookup answered %d", ErrUnavailable, status)

@@ -170,17 +170,21 @@ func TestMember(t *testing.T) {
 	}
 }
 
+// Any answer but 200 or 404 is identity failing: its 503 when its Postgres is down, and a
+// 400 or 422, which no lookup's contract has.
 func TestUnavailable(t *testing.T) {
 	f := newFake()
-	f.status = http.StatusInternalServerError
 	srv := httptest.NewServer(f)
 	c := New(srv.URL, nil)
 	ctx := context.Background()
-	if _, err := c.Chain(ctx, orgID, "req-1"); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("500: %v", err)
-	}
-	if _, err := c.Member(ctx, orgID, danaID, "req-1"); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("500: %v", err)
+	for _, status := range []int{http.StatusBadRequest, http.StatusUnprocessableEntity, http.StatusInternalServerError, http.StatusServiceUnavailable} {
+		f.status = status
+		if _, err := c.Chain(ctx, orgID, "req-1"); !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("%d: %v", status, err)
+		}
+		if _, err := c.Member(ctx, orgID, danaID, "req-1"); !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("%d: %v", status, err)
+		}
 	}
 	srv.Close()
 	if _, err := c.Chain(ctx, orgID, "req-1"); !errors.Is(err, ErrUnavailable) {
