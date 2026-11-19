@@ -34,7 +34,7 @@ services:
     image: ghcr.io/plat5dev/operator-audit:${OPERATOR_VERSION:?set OPERATOR_VERSION}
     command: ["serve"]
     environment:
-      DATABASE_URL: postgres://audit_writer:${AUDIT_WRITER_PASSWORD:-}@operator-postgres:5432/operator?sslmode=disable
+      DATABASE_URL: postgres://audit_writer:${AUDIT_WRITER_PASSWORD:?set AUDIT_WRITER_PASSWORD}@operator-postgres:5432/operator?sslmode=disable
     depends_on:
       operator-audit-migrate:
         condition: service_completed_successfully
@@ -50,7 +50,7 @@ services:
     image: ghcr.io/plat5dev/operator-audit:${OPERATOR_VERSION:?set OPERATOR_VERSION}
     command: ["migrate"]
     environment:
-      DATABASE_URL: postgres://audit_owner:${AUDIT_OWNER_PASSWORD:-}@operator-postgres:5432/operator?sslmode=disable
+      DATABASE_URL: postgres://audit_owner:${AUDIT_OWNER_PASSWORD:?set AUDIT_OWNER_PASSWORD}@operator-postgres:5432/operator?sslmode=disable
       WRITER_ROLE: audit_writer
     depends_on:
       operator-postgres:
@@ -61,10 +61,10 @@ services:
   operator-postgres:
     image: postgres:17
     environment:
-      POSTGRES_PASSWORD: ${OPERATOR_POSTGRES_PASSWORD:-}
+      POSTGRES_PASSWORD: ${OPERATOR_POSTGRES_PASSWORD:?set OPERATOR_POSTGRES_PASSWORD}
       POSTGRES_DB: operator
-      AUDIT_OWNER_PASSWORD: ${AUDIT_OWNER_PASSWORD:-}
-      AUDIT_WRITER_PASSWORD: ${AUDIT_WRITER_PASSWORD:-}
+      AUDIT_OWNER_PASSWORD: ${AUDIT_OWNER_PASSWORD:?set AUDIT_OWNER_PASSWORD}
+      AUDIT_WRITER_PASSWORD: ${AUDIT_WRITER_PASSWORD:?set AUDIT_WRITER_PASSWORD}
     volumes:
       - ./postgres-init.sh:/docker-entrypoint-initdb.d/10-audit-roles.sh:ro
       - operator-postgres:/var/lib/postgresql/data

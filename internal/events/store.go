@@ -16,7 +16,10 @@ import (
 
 var ErrNotFound = errors.New("not found")
 
-const queryTimeout = 5 * time.Second
+const (
+	queryTimeout     = 5 * time.Second
+	partitionTimeout = 30 * time.Second
+)
 
 // Store is the audit_events table, used as the writer role (docs/internals/audit-storage.md#roles).
 type Store struct {
@@ -262,7 +265,7 @@ func (s *Store) MaintainPartitions(ctx context.Context, interval time.Duration, 
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if err := s.EnsureAround(ctx, time.Now()); err != nil {
+			if err := s.EnsureAround(ctx, time.Now()); err != nil && ctx.Err() == nil {
 				onErr(err)
 			}
 		}
@@ -274,6 +277,8 @@ func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 // ensurePartition runs as the owner through a SECURITY DEFINER function, so the writer
 // needs no DDL rights.
 func (s *Store) ensurePartition(ctx context.Context, at time.Time) error {
+	ctx, cancel := context.WithTimeout(ctx, partitionTimeout)
+	defer cancel()
 	if _, err := s.pool.Exec(ctx, `SELECT ensure_partition($1)`, at); err != nil {
 		return fmt.Errorf("ensure partition for %s: %w", at.UTC().Format("2006-01"), err)
 	}

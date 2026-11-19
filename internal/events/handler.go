@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/plat5dev/operator/internal/apierr"
+	"github.com/plat5dev/operator/internal/db"
 )
 
 const maxBodyBytes = 64 << 10
@@ -57,7 +58,7 @@ func (h *Handler) PutIntent(w http.ResponseWriter, r *http.Request) {
 	created, err := h.store.CreateIntent(r.Context(), in)
 	if err != nil {
 		h.log.Error("create audit intent", "request_id", in.RequestID, "err", err)
-		apierr.Unavailable(w, r)
+		writeStoreErr(w, r, err)
 		return
 	}
 	if created {
@@ -85,7 +86,7 @@ func (h *Handler) PatchOutcome(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.log.Error("apply audit outcome", "request_id", requestID, "err", err)
-		apierr.Unavailable(w, r)
+		writeStoreErr(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -160,7 +161,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	list, hasMore, err := h.store.List(r.Context(), f)
 	if err != nil {
 		h.log.Error("list audit events", "request_id", apierr.RequestID(r.Context()), "err", err)
-		apierr.Internal(w, r)
+		writeStoreErr(w, r, err)
 		return
 	}
 	resp := listResponse{AuditEvents: make([]eventResponse, 0, len(list)), HasMore: hasMore}
@@ -170,6 +171,14 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func writeStoreErr(w http.ResponseWriter, r *http.Request, err error) {
+	if db.Unavailable(err) {
+		apierr.Unavailable(w, r)
+		return
+	}
+	apierr.Internal(w, r)
 }
 
 func readBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {

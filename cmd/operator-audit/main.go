@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"sync"
 	"syscall"
 	"time"
 
@@ -67,10 +68,10 @@ func run(cmd string, log *slog.Logger) error {
 		log.Info("migrated", "version", db.LatestVersion(), "writer_role", cfg.WriterRole)
 		return nil
 	}
-	return serve(ctx, cfg, pool, log)
+	return serve(ctx, stop, cfg, pool, log)
 }
 
-func serve(ctx context.Context, cfg config, pool *pgxpool.Pool, log *slog.Logger) error {
+func serve(ctx context.Context, stop context.CancelFunc, cfg config, pool *pgxpool.Pool, log *slog.Logger) error {
 	// The role that serves can change no history (docs/internals/audit-storage.md#roles).
 	if err := db.CheckWriter(ctx, pool); err != nil {
 		return err
@@ -83,10 +84,20 @@ func serve(ctx context.Context, cfg config, pool *pgxpool.Pool, log *slog.Logger
 	reg := metrics.NewRegistry()
 	stale := reg.Gauge("operator_audit_stale_pending",
 		"Events from the last 24 hours still pending after 10 minutes. Checked every minute.")
-	go store.MaintainPartitions(ctx, partitionInterval, func(err error) {
-		log.Error("audit partition maintenance failed", "err", err)
-	})
-	go countStale(ctx, store, stale, log)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		store.MaintainPartitions(ctx, partitionInterval, func(err error) {
+			if ctx.Err() == nil {
+				log.Error("audit partition maintenance failed", "err", err)
+			}
+		})
+	}()
+	go func() {
+		defer wg.Done()
+		countStale(ctx, store, stale, log)
+	}()
 
 	handler := events.NewHandler(store, log)
 	public := http.NewServeMux()
@@ -112,7 +123,7 @@ func serve(ctx context.Context, cfg config, pool *pgxpool.Pool, log *slog.Logger
 
 	servers := []*http.Server{
 		{Addr: cfg.Addr, Handler: withRequest(public, log), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second},
-		{Addr: net.JoinHostPort("", cfg.InternalPort), Handler: withRequest(internal, log), ReadHeaderTimeout: 5 * time.Second},
+		{Addr: net.JoinHostPort("", cfg.InternalPort), Handler: withRequest(internal, log), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second},
 	}
 	log.Info("starting", "addr", cfg.Addr, "internal_port", cfg.InternalPort, "version", db.LatestVersion())
 
@@ -129,11 +140,13 @@ func serve(ctx context.Context, cfg config, pool *pgxpool.Pool, log *slog.Logger
 	case <-ctx.Done():
 	case err = <-errc:
 	}
+	stop()
 	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	for _, srv := range servers {
 		_ = srv.Shutdown(shutdown)
 	}
+	wg.Wait()
 	return err
 }
 
@@ -144,7 +157,9 @@ func countStale(ctx context.Context, store *events.Store, g *metrics.Gauge, log 
 	for {
 		n, err := store.StalePending(ctx, time.Now())
 		if err != nil {
-			log.Error("counting stale pending audit events failed", "err", err)
+			if ctx.Err() == nil {
+				log.Error("counting stale pending audit events failed", "err", err)
+			}
 		} else {
 			g.Set(float64(n))
 		}
@@ -172,21 +187,24 @@ func withRequest(next http.Handler, log *slog.Logger) http.Handler {
 		r = r.WithContext(apierr.WithRequestID(r.Context(), id))
 		rec := &recorder{ResponseWriter: w}
 		defer func() {
-			if rv := recover(); rv != nil {
+			rv := recover()
+			if rv != nil && rv != http.ErrAbortHandler {
 				log.Error("panic", "request_id", id, "panic", rv)
 				if rec.status == 0 {
 					apierr.Internal(rec, r)
 				}
 			}
-			if r.Pattern == "GET /health/live" || r.Pattern == "GET /health/ready" || r.Pattern == "GET /metrics" {
-				return
+			if r.Pattern != "GET /health/live" && r.Pattern != "GET /health/ready" && r.Pattern != "GET /metrics" {
+				route := r.Pattern
+				if route == "" || route == "/" {
+					route = r.Method + " " + r.URL.EscapedPath()
+				}
+				log.Info("request", "request_id", id, "route", route, "status", rec.status,
+					"duration_ms", time.Since(start).Milliseconds())
 			}
-			route := r.Pattern
-			if route == "" || route == "/" {
-				route = r.Method + " " + r.URL.EscapedPath()
+			if rv == http.ErrAbortHandler {
+				panic(rv)
 			}
-			log.Info("request", "request_id", id, "route", route, "status", rec.status,
-				"duration_ms", time.Since(start).Milliseconds())
 		}()
 		next.ServeHTTP(rec, r)
 	})

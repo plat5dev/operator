@@ -111,8 +111,10 @@ func New(cfg Config) *Gateway {
 	}
 	transport := &http.Transport{
 		DialContext:           (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: cfg.UpstreamTimeout,
 		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   64,
 		IdleConnTimeout:       90 * time.Second,
 	}
 	for _, r := range cfg.Routes.Routes() {
@@ -200,8 +202,11 @@ func (g *Gateway) proxy(route *routes.Route, transport http.RoundTripper) *httpu
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			if st := audit.StateFrom(r.Context()); st != nil && r.Context().Err() != nil {
-				st.ClientGone = true
+			if r.Context().Err() != nil {
+				if st := audit.StateFrom(r.Context()); st != nil {
+					st.ClientGone = true
+				}
+				return
 			}
 			g.log.Warn("upstream failed", "request_id", apierr.RequestID(r.Context()), "service", route.Service(), "err", err)
 			apierr.BadGateway(w, r)
@@ -291,6 +296,12 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			panic(rv)
 		}
 	}()
+
+	// Reject requests with no path (e.g. OPTIONS *): no route or audit path can represent one.
+	if r.URL.EscapedPath() == "" {
+		apierr.InvalidRequest(w, r)
+		return
+	}
 
 	// 1. Preflight from an allowed origin is answered here, never forwarded.
 	if r.Method == http.MethodOptions && allowedOrigin && r.Header.Get("Access-Control-Request-Method") != "" {
@@ -395,10 +406,10 @@ func intent(r *http.Request, id string, at time.Time, op *auth.Operator, m *rout
 		RequestID:  id,
 		OccurredAt: audit.Timestamp(at),
 		Actor: audit.Actor{
-			Issuer:     audit.Text(op.Issuer),
-			OperatorID: audit.Text(op.ID),
-			Email:      optional(op.Email),
-			ClientID:   optional(op.ClientID),
+			Issuer:     audit.TruncateBytes(op.Issuer, audit.MaxActorBytes),
+			OperatorID: audit.TruncateBytes(op.ID, audit.MaxActorBytes),
+			Email:      optional(op.Email, audit.MaxActorBytes),
+			ClientID:   optional(op.ClientID, audit.MaxActorBytes),
 		},
 		Nodes:     []audit.Node{},
 		Method:    r.Method,
@@ -414,7 +425,7 @@ func intent(r *http.Request, id string, at time.Time, op *auth.Operator, m *rout
 	service, template := m.Route.Service(), m.Template()
 	in.Service, in.Route = &service, &template
 	for k, v := range m.Params {
-		in.Params[k] = audit.Text(v)
+		in.Params[k] = audit.TruncateBytes(v, audit.MaxParamValueBytes)
 	}
 	if chain := res.found(); len(chain) > 0 {
 		for _, n := range chain {
@@ -429,11 +440,11 @@ func intent(r *http.Request, id string, at time.Time, op *auth.Operator, m *rout
 	return in
 }
 
-func optional(s string) *string {
+func optional(s string, maxBytes int) *string {
 	if s == "" {
 		return nil
 	}
-	s = audit.Text(s)
+	s = audit.TruncateBytes(s, maxBytes)
 	return &s
 }
 

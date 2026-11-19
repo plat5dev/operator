@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/plat5dev/operator/internal/metrics"
 )
@@ -301,6 +302,17 @@ func TestText(t *testing.T) {
 	}
 	if Timestamp(time.Date(2026, 10, 9, 18, 30, 0, 123_456_789, time.FixedZone("x", 3600))) != "2026-10-09T17:30:00.123Z" {
 		t.Fatal("Timestamp")
+	}
+	if got := TruncateBytes(strings.Repeat("a", 20), 10); got != strings.Repeat("a", 10) {
+		t.Fatalf("ascii truncate: %q", got)
+	}
+	// Multi-byte UTF-8 rune ("é" is 2 bytes) must not be split across the byte cap.
+	if got := TruncateBytes(strings.Repeat("é", 10), 5); !utf8.ValidString(got) || len(got) > 5 || got != "éé" {
+		t.Fatalf("multibyte truncate: %q (len %d)", got, len(got))
+	}
+	// Invalid bytes and NUL expand to 3-byte U+FFFD before truncation.
+	if got := TruncateBytes(strings.Repeat("\x00\xff", 600), MaxActorBytes); !utf8.ValidString(got) || len(got) > MaxActorBytes || strings.ContainsRune(got, 0) {
+		t.Fatalf("expanded truncate: valid=%v len=%d", utf8.ValidString(got), len(got))
 	}
 }
 

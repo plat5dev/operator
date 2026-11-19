@@ -57,7 +57,6 @@ type Operator struct {
 	Issuer string
 	// ClientID is the client the token was issued to: azp, else client_id. Empty when neither.
 	ClientID string
-	Claims   map[string]any
 }
 
 type Verifier struct {
@@ -149,6 +148,7 @@ func (v *Verifier) fetch(ctx context.Context) (map[string]jose.JSONWebKey, error
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 4096))
 		return nil, fmt.Errorf("jwks: status %d", res.StatusCode)
 	}
 	var set struct {
@@ -164,7 +164,7 @@ func (v *Verifier) fetch(ctx context.Context) (map[string]jose.JSONWebKey, error
 		if err := k.UnmarshalJSON(raw); err != nil {
 			continue
 		}
-		if k.KeyID == "" || k.Use == "enc" {
+		if k.KeyID == "" || (k.Use != "" && k.Use != "sig") {
 			continue
 		}
 		pub := k.Public()
@@ -199,7 +199,7 @@ func (v *Verifier) key(ctx context.Context, kid string) (jose.JSONWebKey, bool) 
 	if v.now().Sub(v.lastAttempt) < refetchInterval {
 		return jose.JSONWebKey{}, false
 	}
-	if err := v.refresh(ctx); err != nil {
+	if err := v.refresh(context.WithoutCancel(ctx)); err != nil {
 		v.log.Warn("jwks refetch for unknown kid failed", "err", err)
 	}
 	return v.lookup(kid)
@@ -223,6 +223,9 @@ func (v *Verifier) Verify(ctx context.Context, header string) (*Operator, error)
 	}
 	key, ok := v.key(ctx, tok.Headers[0].KeyID)
 	if !ok {
+		return nil, ErrInvalid
+	}
+	if key.Algorithm != "" && key.Algorithm != tok.Headers[0].Algorithm {
 		return nil, ErrInvalid
 	}
 	var reg jwt.Claims
@@ -253,7 +256,7 @@ func (v *Verifier) Verify(ctx context.Context, header string) (*Operator, error)
 	if client == "" {
 		client, _ = all["client_id"].(string)
 	}
-	return &Operator{ID: id, Email: email, Issuer: reg.Issuer, ClientID: client, Claims: all}, nil
+	return &Operator{ID: id, Email: email, Issuer: reg.Issuer, ClientID: client}, nil
 }
 
 func claim(claims map[string]any, path string) any {

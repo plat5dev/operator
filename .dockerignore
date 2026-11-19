@@ -1,4 +1,5 @@
 .git
 compose
 docs
+e2e
 *.md

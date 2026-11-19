@@ -82,6 +82,7 @@ func run(log *slog.Logger) error {
 		Addr:              net.JoinHostPort("", cfg.InternalPort),
 		Handler:           internalRoutes(verifier, reg),
 		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	log.Info("starting", "addr", cfg.Addr, "internal_port", cfg.InternalPort, "routes", table.Len(),
@@ -105,6 +106,7 @@ func run(log *slog.Logger) error {
 	case <-ctx.Done():
 	case err = <-errc:
 	}
+	stop()
 	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = api.Shutdown(shutdown)
@@ -116,7 +118,9 @@ func run(log *slog.Logger) error {
 			log.Error("audit outcomes lost at shutdown", "err", err)
 		}
 	}
-	_ = internal.Shutdown(shutdown)
+	internalShutdown, internalCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer internalCancel()
+	_ = internal.Shutdown(internalShutdown)
 	return err
 }
 

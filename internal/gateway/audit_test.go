@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/plat5dev/operator/internal/audit"
 	"github.com/plat5dev/operator/internal/auth"
@@ -249,11 +250,17 @@ func TestAuditClientGone(t *testing.T) {
 		<-r.Context().Done()
 	})
 	rec := &recordingAudit{}
-	h, _ := setupWith(t, up.srv.URL, fakeAuth{}, 0, rec, nil)
+	h, logs := setupWith(t, up.srv.URL, fakeAuth{}, 0, rec, nil)
 	r := httptest.NewRequest("GET", "/nodes", nil).WithContext(ctx)
 	r.Header.Set("Authorization", "Bearer good")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
+	if w.Body.Len() != 0 {
+		t.Fatalf("expected empty body on client disconnect, got %q", w.Body.String())
+	}
+	if strings.Contains(logs.String(), "upstream failed") {
+		t.Fatalf("unexpected upstream failed log: %s", logs.String())
+	}
 	_, out := rec.only(t, w)
 	if out.Outcome != audit.NoResponse || out.Status != nil {
 		t.Fatalf("outcome %+v", out)
@@ -289,6 +296,60 @@ func TestAuditParamsAreStorable(t *testing.T) {
 	in, _ := rec.only(t, w)
 	if got := in.Params["user_id"]; got != "a\uFFFDb\uFFFD" {
 		t.Fatalf("param %q", got)
+	}
+}
+
+type longActorAuth struct{}
+
+func (longActorAuth) Verify(_ context.Context, _ string) (*auth.Operator, error) {
+	return &auth.Operator{
+		ID:       strings.Repeat("é", 800),
+		Email:    strings.Repeat("x\x00", 800),
+		Issuer:   "https://idp.test/" + strings.Repeat("a", 2000),
+		ClientID: strings.Repeat("c", 2000),
+	}, nil
+}
+
+func TestAuditFieldsAreBounded(t *testing.T) {
+	rec := &recordingAudit{}
+	up := newUpstream(t, nil)
+	h, _ := setupWith(t, up.srv.URL, longActorAuth{}, 0, rec, nil)
+	w := do(h, "GET", "/users/"+strings.Repeat("%FF", 2000), map[string]string{"Authorization": "Bearer good"})
+	if w.Code != http.StatusTeapot {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body)
+	}
+	in, _ := rec.only(t, w)
+	for name, val := range map[string]string{
+		"issuer":      in.Actor.Issuer,
+		"operator_id": in.Actor.OperatorID,
+		"email":       *in.Actor.Email,
+		"client_id":   *in.Actor.ClientID,
+	} {
+		if len(val) == 0 || len(val) > audit.MaxActorBytes || !utf8.ValidString(val) || strings.ContainsRune(val, 0) {
+			t.Errorf("actor.%s invalid: len=%d valid=%v", name, len(val), utf8.ValidString(val))
+		}
+	}
+	if p := in.Params["user_id"]; len(p) == 0 || len(p) > audit.MaxParamValueBytes || !utf8.ValidString(p) || strings.ContainsRune(p, 0) {
+		t.Errorf("params.user_id invalid: len=%d valid=%v", len(p), utf8.ValidString(p))
+	}
+}
+
+func TestAuditEmptyPathReturns400WithoutAudit(t *testing.T) {
+	rec := &recordingAudit{}
+	up := newUpstream(t, nil)
+	h, _ := setupWith(t, up.srv.URL, fakeAuth{}, 0, rec, nil)
+	r := httptest.NewRequest("OPTIONS", "http://example.com", nil)
+	r.URL.Path = ""
+	r.URL.RawPath = ""
+	r.RequestURI = "*"
+	r.Header.Set("Authorization", "Bearer good")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 400 || decode(t, w).Error.Code != "INVALID_REQUEST" {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body)
+	}
+	if rec.count() != 0 {
+		t.Fatalf("expected 0 audit intents, got %d", rec.count())
 	}
 }
 

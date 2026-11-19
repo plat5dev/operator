@@ -1,6 +1,13 @@
 package main
 
-import "testing"
+import (
+	"bytes"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
 
 func env(m map[string]string) func(string) string {
 	return func(k string) string { return m[k] }
@@ -44,5 +51,25 @@ func TestConfigErrors(t *testing.T) {
 				t.Fatal("want error")
 			}
 		})
+	}
+}
+
+func TestWithRequestAbortHandler(t *testing.T) {
+	var logs bytes.Buffer
+	log := slog.New(slog.NewJSONHandler(&logs, nil))
+	h := withRequest(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic(http.ErrAbortHandler)
+	}), log)
+
+	var recovered any
+	func() {
+		defer func() { recovered = recover() }()
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/operator-audit-events", nil))
+	}()
+	if recovered != http.ErrAbortHandler {
+		t.Fatalf("recovered = %v, want http.ErrAbortHandler", recovered)
+	}
+	if strings.Contains(logs.String(), `"msg":"panic"`) {
+		t.Fatalf("ErrAbortHandler logged as panic: %s", logs.String())
 	}
 }

@@ -15,13 +15,11 @@ import (
 // Limits on what the gateway sends (docs/reference/api/operator-audit.md#event). The gateway truncates or
 // cleans before it sends, so a value over a limit is a bug and gets 422.
 const (
-	maxRequestIDLen  = 128
 	maxActorLen      = 1024
 	maxIDLen         = 256
 	maxCreatedLen    = 128
 	maxNodes         = 32
 	maxServiceLen    = 128
-	maxMethodLen     = 32
 	maxRouteLen      = 2048
 	maxPathChars     = 2048
 	maxParams        = 32

@@ -4,15 +4,19 @@ package db
 
 import (
 	"context"
+	"database/sql/driver"
 	"embed"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -115,7 +119,11 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, writerRole string) error {
 	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock(hashtext('audit.migrate'))`); err != nil {
 		return err
 	}
-	defer conn.Exec(context.Background(), `SELECT pg_advisory_unlock(hashtext('audit.migrate'))`)
+	defer func() {
+		unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = conn.Exec(unlockCtx, `SELECT pg_advisory_unlock(hashtext('audit.migrate'))`)
+	}()
 
 	// A deployment may create the schema for the owner, who then needs no CREATE on the
 	// database. IF NOT EXISTS would still ask for it, so look first.
@@ -218,4 +226,30 @@ func CheckWriter(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("%w: role %q cannot write audit events; run operator-audit migrate with WRITER_ROLE=%s", ErrNotWriter, me, me)
 	}
 	return nil
+}
+
+// Unavailable reports whether err means Postgres couldn't be reached or didn't answer in time:
+// a failed connect, a closed connection, a network error, cancellation or timeout, or Postgres
+// refusing connections or out of resources (SQLSTATE classes 08, 53, 57).
+func Unavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	var connectErr *pgconn.ConnectError
+	var netErr net.Error
+	var pgErr *pgconn.PgError
+	switch {
+	case errors.As(err, &connectErr), errors.As(err, &netErr):
+		return true
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled), pgconn.Timeout(err):
+		return true
+	case errors.Is(err, driver.ErrBadConn), errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, net.ErrClosed):
+		return true
+	case errors.As(err, &pgErr) && len(pgErr.Code) >= 2:
+		switch pgErr.Code[:2] {
+		case "08", "53", "57":
+			return true
+		}
+	}
+	return false
 }

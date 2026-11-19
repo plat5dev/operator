@@ -177,23 +177,6 @@ func (o *operator) call(method, path string, body any) response {
 	return out
 }
 
-// until calls every half second until done, for up to 30 seconds: identity takes a newly
-// applied config shortly after the apply.
-func (o *operator) until(done func(response) bool, method, path string, body any) response {
-	o.t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		r := o.call(method, path, body)
-		if done(r) {
-			return r
-		}
-		if time.Now().After(deadline) {
-			o.t.Fatalf("%s %s: still %d after 30s: %s", method, path, r.status, r.raw)
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-}
-
 // must calls and fails unless the status is want.
 func (o *operator) must(want int, method, path string, body any) response {
 	o.t.Helper()

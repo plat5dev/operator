@@ -2,6 +2,7 @@ package events
 
 import (
 	"context"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"io"
@@ -12,17 +13,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/plat5dev/operator/internal/apierr"
 )
 
 // memStore keeps events in memory with the store's write rules.
 type memStore struct {
-	events  map[string]*Event
-	listErr error
-	filter  Filter
+	events     map[string]*Event
+	intentErr  error
+	outcomeErr error
+	listErr    error
+	filter     Filter
 }
 
 func (m *memStore) CreateIntent(_ context.Context, in *Intent) (bool, error) {
+	if m.intentErr != nil {
+		return false, m.intentErr
+	}
 	if m.events == nil {
 		m.events = map[string]*Event{}
 	}
@@ -34,6 +42,9 @@ func (m *memStore) CreateIntent(_ context.Context, in *Intent) (bool, error) {
 }
 
 func (m *memStore) ApplyOutcome(_ context.Context, requestID string, out *Outcome) (bool, error) {
+	if m.outcomeErr != nil {
+		return false, m.outcomeErr
+	}
 	e, ok := m.events[requestID]
 	if !ok {
 		return false, ErrNotFound
@@ -168,5 +179,46 @@ func TestList(t *testing.T) {
 	s.listErr = errors.New("down")
 	if w := call(h, "GET", "/operator-audit-events", ""); w.Code != 500 || code(t, w) != "INTERNAL_ERROR" {
 		t.Fatalf("store error %d", w.Code)
+	}
+}
+
+func TestStoreErrorMapping(t *testing.T) {
+	intentBody := string(intentJSON(t, nil))
+	outcomeBody := `{"outcome":"responded","status":200,"response_bytes":0}`
+
+	cases := []struct {
+		name     string
+		err      error
+		wantHTTP int
+		wantCode string
+	}{
+		{"deadline exceeded", context.DeadlineExceeded, 503, "SERVICE_UNAVAILABLE"},
+		{"canceled", context.Canceled, 503, "SERVICE_UNAVAILABLE"},
+		{"bad conn", driver.ErrBadConn, 503, "SERVICE_UNAVAILABLE"},
+		{"pg connect error", &pgconn.ConnectError{}, 503, "SERVICE_UNAVAILABLE"},
+		{"pg sqlstate 08", &pgconn.PgError{Code: "08006"}, 503, "SERVICE_UNAVAILABLE"},
+		{"pg sqlstate 53", &pgconn.PgError{Code: "53300"}, 503, "SERVICE_UNAVAILABLE"},
+		{"pg sqlstate 57", &pgconn.PgError{Code: "57P03"}, 503, "SERVICE_UNAVAILABLE"},
+		{"unexpected error", errors.New("unexpected"), 500, "INTERNAL_ERROR"},
+		{"pg data error", &pgconn.PgError{Code: "22P02"}, 500, "INTERNAL_ERROR"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := &memStore{intentErr: c.err, outcomeErr: c.err, listErr: c.err}
+			h := mux(s)
+
+			for _, req := range []struct {
+				method, target, body string
+			}{
+				{"PUT", "/internal/events/r1", intentBody},
+				{"PATCH", "/internal/events/r1", outcomeBody},
+				{"GET", "/operator-audit-events", ""},
+			} {
+				w := call(h, req.method, req.target, req.body)
+				if w.Code != c.wantHTTP || code(t, w) != c.wantCode {
+					t.Errorf("%s %s: status=%d code=%s, want %d %s", req.method, req.target, w.Code, code(t, w), c.wantHTTP, c.wantCode)
+				}
+			}
+		})
 	}
 }

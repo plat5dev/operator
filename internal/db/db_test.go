@@ -2,11 +2,16 @@ package db_test
 
 import (
 	"context"
+	"database/sql/driver"
 	"errors"
+	"fmt"
+	"io"
+	"net"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/plat5dev/operator/internal/db"
@@ -100,5 +105,36 @@ func TestMigrateAndRoles(t *testing.T) {
 	}
 	if _, err := writer.Exec(ctx, `UPDATE audit_events SET outcome = 'rejected'`); err == nil || !strings.Contains(err.Error(), "already has an outcome") {
 		t.Errorf("final -> other: %v", err)
+	}
+}
+
+func TestUnavailable(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"generic", errors.New("boom"), false},
+		{"pg unique violation", &pgconn.PgError{Code: "23505"}, false},
+		{"pg invalid syntax", &pgconn.PgError{Code: "22P02"}, false},
+		{"deadline exceeded", fmt.Errorf("wrap: %w", context.DeadlineExceeded), true},
+		{"canceled", context.Canceled, true},
+		{"bad conn", fmt.Errorf("wrap: %w", driver.ErrBadConn), true},
+		{"eof", io.EOF, true},
+		{"unexpected eof", io.ErrUnexpectedEOF, true},
+		{"net closed", net.ErrClosed, true},
+		{"net error", &net.DNSError{IsTimeout: true}, true},
+		{"connect error", &pgconn.ConnectError{}, true},
+		{"sqlstate 08", &pgconn.PgError{Code: "08006"}, true},
+		{"sqlstate 53", &pgconn.PgError{Code: "53300"}, true},
+		{"sqlstate 57", &pgconn.PgError{Code: "57P03"}, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := db.Unavailable(c.err); got != c.want {
+				t.Fatalf("Unavailable(%v) = %v, want %v", c.err, got, c.want)
+			}
+		})
 	}
 }

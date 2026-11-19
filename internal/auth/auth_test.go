@@ -333,3 +333,64 @@ func TestUnknownKidRefetch(t *testing.T) {
 		t.Fatalf("cached key lost: %v", err)
 	}
 }
+
+func TestJWKUseAndAlgorithm(t *testing.T) {
+	sigKey := rsaKey(t, "sig")
+	emptyUse := rsaKey(t, "empty-use")
+	emptyUse.Use = ""
+	encKey := rsaKey(t, "enc")
+	encKey.Use = "enc"
+	otherUse := rsaKey(t, "other-use")
+	otherUse.Use = "wrap"
+	noAlg := rsaKey(t, "no-alg")
+	noAlg.Algorithm = ""
+
+	p := newIDP(t, sigKey, emptyUse, encKey, otherUse, noAlg)
+	v := newVerifier(t, p)
+	now := time.Now()
+
+	cases := []struct {
+		name string
+		key  jose.JSONWebKey
+		alg  jose.SignatureAlgorithm
+		want error
+	}{
+		{"use sig", sigKey, jose.RS256, nil},
+		{"use empty", emptyUse, jose.RS256, nil},
+		{"use enc rejected", encKey, jose.RS256, ErrInvalid},
+		{"use other rejected", otherUse, jose.RS256, ErrInvalid},
+		{"alg mismatch RS384 on RS256 key", sigKey, jose.RS384, ErrInvalid},
+		{"alg mismatch PS256 on RS256 key", sigKey, jose.PS256, ErrInvalid},
+		{"key without alg accepts RS384", noAlg, jose.RS384, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tok := "Bearer " + sign(t, c.key, c.alg, std(now))
+			_, err := v.Verify(context.Background(), tok)
+			if !errors.Is(err, c.want) {
+				t.Fatalf("err = %v, want %v", err, c.want)
+			}
+		})
+	}
+}
+
+func TestUnknownKidRefetchIgnoresRequestCancel(t *testing.T) {
+	old := rsaKey(t, "old")
+	rotated := rsaKey(t, "new")
+	p := newIDP(t, old)
+	v := newVerifier(t, p)
+	clock := time.Now().Add(refetchInterval)
+	v.now = func() time.Time { return clock }
+
+	p.set(old, rotated)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	tok := "Bearer " + sign(t, rotated, jose.RS256, std(clock))
+	if _, err := v.Verify(ctx, tok); err != nil {
+		t.Fatalf("refetch failed under canceled request ctx: %v", err)
+	}
+	if p.count() != 2 {
+		t.Fatalf("hits = %d, want 2", p.count())
+	}
+}

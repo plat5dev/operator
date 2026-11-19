@@ -585,6 +585,46 @@ func TestUnauthenticatedIsLogged(t *testing.T) {
 	}
 }
 
+func TestEmptyPathReturns400(t *testing.T) {
+	up := newUpstream(t, nil)
+	h, _ := setup(t, up.srv.URL, fakeAuth{}, 0)
+	r := httptest.NewRequest("OPTIONS", "http://example.com", nil)
+	r.URL.Path = ""
+	r.URL.RawPath = ""
+	r.RequestURI = "*"
+	r.Header.Set("Authorization", "Bearer good")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 400 || decode(t, w).Error.Code != "INVALID_REQUEST" {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body)
+	}
+	if up.seen() != nil {
+		t.Fatal("empty path reached upstream")
+	}
+}
+
+func TestClientDisconnectWritesNoBody(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	up := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		cancel()
+		<-r.Context().Done()
+	})
+	h, logs := setup(t, up.srv.URL, fakeAuth{}, 0)
+	r := httptest.NewRequest("GET", "/nodes", nil).WithContext(ctx)
+	r.Header.Set("Authorization", "Bearer good")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Body.Len() != 0 {
+		t.Fatalf("expected no response body on client disconnect, got %q", w.Body.String())
+	}
+	if strings.Contains(logs.String(), "upstream failed") {
+		t.Fatalf("unexpected upstream failed log on client disconnect: %s", logs.String())
+	}
+	if line := lastLog(t, logs); line["status"] != float64(0) {
+		t.Fatalf("log status = %v, want 0", line["status"])
+	}
+}
+
 func lastLog(t *testing.T, logs *bytes.Buffer) map[string]any {
 	t.Helper()
 	var last map[string]any

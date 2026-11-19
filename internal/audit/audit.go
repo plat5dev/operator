@@ -26,13 +26,15 @@ import (
 // Headers a service sets on its response for the audit log, as Plat5 defines them. The
 // gateway strips every X-Plat5-Audit-* header from responses, on every route.
 const (
-	HeaderPrefix      = "X-Plat5-Audit-"
-	DetailsHeader     = "X-Plat5-Audit-Details"
-	CreatedHeader     = "X-Plat5-Audit-Created"
-	MaxCreatedLen     = 128
-	MaxDetailsBytes   = 4096
-	MaxUserAgentChars = 512
-	MaxPathChars      = 2048
+	HeaderPrefix       = "X-Plat5-Audit-"
+	DetailsHeader      = "X-Plat5-Audit-Details"
+	CreatedHeader      = "X-Plat5-Audit-Created"
+	MaxCreatedLen      = 128
+	MaxDetailsBytes    = 4096
+	MaxActorBytes      = 1024
+	MaxParamValueBytes = 4096
+	MaxUserAgentChars  = 512
+	MaxPathChars       = 2048
 
 	intentAttempts       = 3
 	intentAttemptTimeout = 500 * time.Millisecond
@@ -216,6 +218,23 @@ func Text(s string) string {
 	return strings.ReplaceAll(s, "\x00", "�")
 }
 
+// TruncateBytes makes s storable with Text and caps it at maxBytes UTF-8 bytes
+// without splitting a multi-byte rune.
+func TruncateBytes(s string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	s = Text(s)
+	if len(s) <= maxBytes {
+		return s
+	}
+	n := maxBytes
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
+}
+
 // UserAgent is the header cut to MaxUserAgentChars characters, or nil when absent.
 func UserAgent(s string) *string {
 	if s == "" {
@@ -288,7 +307,15 @@ type queued struct {
 func New(cfg Config) *Writer {
 	client := cfg.Client
 	if client == nil {
-		client = &http.Client{}
+		client = &http.Client{
+			Transport: &http.Transport{
+				DialContext:         (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+				TLSHandshakeTimeout: 10 * time.Second,
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 64,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		}
 	}
 	reg := cfg.Metrics
 	if reg == nil {
