@@ -10,7 +10,7 @@ How a caller gets a token is the IdP's business. People typically use authorizat
 |----------|----------|--|
 | `AUTH_ISSUER` | yes | Must equal the token's `iss` exactly |
 | `AUTH_JWKS_URI` | yes | Where this gateway fetches keys. Separate from the issuer so a container can reach JWKS on an internal address while `iss` stays public |
-| `AUTH_AUDIENCES` | yes | Comma-separated. The token's `aud` must contain one. Empty refuses boot |
+| `AUTH_ALLOWED_AUDIENCES` | yes | Comma-separated. The token's `aud` must contain one. Empty refuses boot |
 | `AUTH_OPERATOR_ID_CLAIM` | no | Dotted JSON path to the operator id. Default `sub` |
 | `AUTH_OPERATOR_EMAIL_CLAIM` | no | Dotted JSON path to the operator's email, recorded in the operator audit log. Default `email`. Absent in a token, the operator has no email |
 
@@ -23,7 +23,7 @@ All of these, or **401**:
 - The signature verifies against a JWKS key matching the header `kid`
 - `alg` is asymmetric (RS256, RS384, RS512, ES256, ES384, PS256). `none` and HMAC are rejected
 - `iss` equals `AUTH_ISSUER`
-- `aud` contains one of `AUTH_AUDIENCES`
+- `aud` contains one of `AUTH_ALLOWED_AUDIENCES`
 - `exp` is present and in the future; `nbf`, when present, is in the past. 60 seconds of clock leeway
 - The operator id claim is present and a non-empty string
 

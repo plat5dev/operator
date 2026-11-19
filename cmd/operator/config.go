@@ -41,7 +41,7 @@ func loadConfig(getenv func(string) string) (config, error) {
 		IdentityURL:  strings.TrimRight(get("IDENTITY_URL", ""), "/"),
 		Issuer:       get("AUTH_ISSUER", ""),
 		JWKSURI:      get("AUTH_JWKS_URI", ""),
-		Audiences:    list(getenv("AUTH_AUDIENCES")),
+		Audiences:    list(getenv("AUTH_ALLOWED_AUDIENCES")),
 		IDClaim:      get("AUTH_OPERATOR_ID_CLAIM", "sub"),
 		EmailClaim:   get("AUTH_OPERATOR_EMAIL_CLAIM", "email"),
 	}
@@ -53,16 +53,16 @@ func loadConfig(getenv func(string) string) (config, error) {
 		errs = append(errs, errors.New("AUTH_JWKS_URI must be an http or https URL"))
 	}
 	if len(c.Audiences) == 0 {
-		errs = append(errs, errors.New("AUTH_AUDIENCES is required"))
+		errs = append(errs, errors.New("AUTH_ALLOWED_AUDIENCES is required"))
 	}
 	if p, err := strconv.Atoi(c.InternalPort); err != nil || p < 1 || p > 65535 {
 		errs = append(errs, errors.New("INTERNAL_PORT must be a port number"))
 	}
-	ms, err := strconv.Atoi(get("UPSTREAM_TIMEOUT_MS", "30000"))
-	if err != nil || ms <= 0 {
-		errs = append(errs, errors.New("UPSTREAM_TIMEOUT_MS must be a positive integer"))
+	timeout, err := time.ParseDuration(get("UPSTREAM_TIMEOUT", "30s"))
+	if err != nil || timeout <= 0 {
+		errs = append(errs, errors.New("UPSTREAM_TIMEOUT must be a positive duration such as 30s"))
 	}
-	c.UpstreamTimeout = time.Duration(ms) * time.Millisecond
+	c.UpstreamTimeout = timeout
 	for _, o := range list(getenv("ALLOWED_ORIGINS")) {
 		origin, err := parseOrigin(o)
 		if err != nil {

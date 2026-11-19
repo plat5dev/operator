@@ -1,6 +1,6 @@
 # Model
 
-> The operator plane's concepts and principles. When another doc disagrees with this page, the other doc is wrong. Why each decision was made: [decisions](../decisions/README.md), by topic.
+> The operator plane's concepts and principles. When another doc disagrees with this page, the other doc is wrong.
 
 The operator plane is a second front door onto the services a Plat5 deployment runs. Services do no auth, so any front door on the private network can call them (Plat5 `docs/concepts/model.md`, principle 6). This one is for operators: it checks a token from the operator IdP, records the request in the operator audit log, and forwards the service's own path, by node id.
 
@@ -30,7 +30,7 @@ Neither gateway calls the other. This gateway serves no UI, stores no accounts, 
 |--|----------------|---------------|
 | Who is calling | An operator | A person or service account |
 | How the target is named | Node ids in the path: the service's own path | Slugs or ids in the edge path, rewritten to the service's path |
-| Who may call | Any authenticated operator, today ([`TODO.md`](../../TODO.md)) | The ancestor rule over the caller's bindings |
+| Who may call | Any authenticated operator | The ancestor rule over the caller's bindings |
 | What the service is told | The path; the chain, when the route names a node; `X-Plat5-Operator-Id`; the member and its principal only when acting as one | The rewritten path, the chain, the member and its principal; on a user route, the user id |
 | Where it's recorded | The operator audit log | The tree's audit log |
 
@@ -46,7 +46,7 @@ The operator id is not a customer member, not a principal, and not a customer Id
 4. **A member id only by saying so.** `/as/{member}`, on a route that allows it, for a member active in the route node's tree. Access is still the operator's, never the member's.
 5. **Every authenticated request is recorded before it's answered.** Audit is on or off for the deployment, and on by default.
 6. **The operator IdP is the only source of who is an operator.** No accounts, passwords, or sessions here.
-7. **Narrowing who may call is a decision service's job.** Any authenticated operator may call any route today. No role, group, or allow-list check goes into this gateway ([`TODO.md`](../../TODO.md)).
+7. **Narrowing who may call is a decision service's job.** Any authenticated operator may call any route today. No role, group, or allow-list check goes into this gateway.
 
 ## Where each decision lives
 

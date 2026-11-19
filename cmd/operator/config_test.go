@@ -12,10 +12,10 @@ func env(m map[string]string) func(string) string {
 
 func base() map[string]string {
 	return map[string]string{
-		"AUTH_ISSUER":    "http://localhost:5556/dex",
-		"AUTH_JWKS_URI":  "http://dex:5556/dex/keys",
-		"AUTH_AUDIENCES": "operator-cli, operator-console",
-		"AUDIT_URL":      "http://operator-audit:8005/",
+		"AUTH_ISSUER":            "http://localhost:5556/dex",
+		"AUTH_JWKS_URI":          "http://dex:5556/dex/keys",
+		"AUTH_ALLOWED_AUDIENCES": "operator-cli, operator-console",
+		"AUDIT_URL":              "http://operator-audit:8005/",
 	}
 }
 
@@ -78,11 +78,11 @@ func TestConfigErrors(t *testing.T) {
 		"no issuer":        {"AUTH_ISSUER": ""},
 		"no jwks":          {"AUTH_JWKS_URI": ""},
 		"bad jwks":         {"AUTH_JWKS_URI": "dex/keys"},
-		"no audience":      {"AUTH_AUDIENCES": " , "},
+		"no audience":      {"AUTH_ALLOWED_AUDIENCES": " , "},
 		"wildcard origin":  {"ALLOWED_ORIGINS": "*"},
 		"origin path":      {"ALLOWED_ORIGINS": "https://a.test/app"},
 		"bad port":         {"INTERNAL_PORT": "http"},
-		"bad timeout":      {"UPSTREAM_TIMEOUT_MS": "0"},
+		"bad timeout":      {"UPSTREAM_TIMEOUT": "0s"},
 		"bad identity url": {"IDENTITY_URL": "identity:3000"},
 		"no audit url":     {"AUDIT_URL": ""},
 		"bad audit url":    {"AUDIT_URL": "operator-audit:8005"},

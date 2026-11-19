@@ -14,8 +14,8 @@ Do not add these because they would be convenient:
 
 - Serving UI or static files
 - Operator accounts, passwords, cookies, or sessions
-- API keys (deferred, [`TODO.md`](../../TODO.md))
-- A role, group, or allow-list check in this gateway. Narrowing who may call is a decision service's job (deferred, [`TODO.md`](../../TODO.md))
+- API keys
+- A role, group, or allow-list check in this gateway. Narrowing who may call is a decision service's job
 - A member id without `/as/{member}`, or applying the member's bindings or permissions to the request
 - Operator headers, roles or rules in Plat5, or values for Plat5's headers that Plat5 doesn't define. This plane's own header is `X-Plat5-Operator-Id`
 - The customer IdP, or a customer member or principal, as an operator

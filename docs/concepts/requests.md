@@ -21,7 +21,7 @@ Every request, in order:
 
 Authentication comes first: an unauthenticated caller learns nothing about the route list. With audit on, every request past authentication is an event, including a **400** or a **404**, and its intent is written before anything answers it.
 
-There is no authorization step. Any authenticated operator may call any route ([`TODO.md`](../../TODO.md)).
+There is no authorization step. Any authenticated operator may call any route.
 
 ## The route node
 
@@ -71,7 +71,7 @@ This gateway generates a request id for every request. A client's `X-Request-ID`
 
 ## Lists
 
-A service never filters a response by operator, and this gateway never filters a response body. Which customers an operator may see is a decision service's question, per request, from the path, once there is one ([`TODO.md`](../../TODO.md)).
+A service never filters a response by operator, and this gateway never filters a response body. Which customers an operator may see is a decision service's question, per request, from the path.
 
 ## Errors
 

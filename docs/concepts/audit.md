@@ -85,7 +85,7 @@ None of them can create an event, or change its outcome, status, actor, nodes or
 
 `GET /operator-audit-events`, on operator-audit's public port, published through this gateway like any route. So each read is itself an event. Events come back newest first, filtered by actor, member acted as, node (an event on the node or anything below it), service, route, params, outcome, request id, created id and time. Shapes and filters: [`reference/api/operator-audit.md`](../reference/api/operator-audit.md).
 
-Any operator can read the whole log until a decision service narrows it ([`TODO.md`](../../TODO.md)).
+Any operator can read the whole log until a decision service narrows it.
 
 ## Not here
 
@@ -94,8 +94,8 @@ Any operator can read the whole log until a decision service narrows it ([`TODO.
 - Audit on for some routes or operators and off for others
 - A client-chosen request id as an event's key
 - Operator events in a Plat5 tree's log, or Plat5's audit service or database as this log's store
-- This log shown to customers (deferred, [`TODO.md`](../../TODO.md))
+- This log shown to customers
 - This gateway reading inside details, or a service header creating, moving or re-outcoming an event
 - Changing an event after its outcome, or deleting events through an API
 - Turning `pending` into anything else after the fact
-- Trusted proxies, a reason for access, retention and purge, and export (deferred, [`TODO.md`](../../TODO.md))
+- Trusted proxies, a reason for access, retention and purge, and export

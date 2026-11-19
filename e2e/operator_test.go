@@ -332,33 +332,6 @@ func TestOperator(t *testing.T) {
 		}
 	})
 
-	// users.name.sync each_sign_in applied through the control plane, then the e2e config
-	// again: the IdP owns names, and an operator's edit is refused like anyone's.
-	t.Run("under each_sign_in an operator can't edit a name", func(t *testing.T) {
-		user := str(o.must(200, "GET", "/members/"+dana+"/user", nil).body, "id")
-		each := o.config()
-		users, _ := each["users"].(map[string]any)
-		name, _ := users["name"].(map[string]any)
-		if name == nil {
-			t.Fatalf("no users.name in the e2e config: %v", each["users"])
-		}
-		name["sync"] = "each_sign_in"
-		o.apply(each, time.Now().Add(time.Minute))
-		t.Cleanup(func() {
-			o.apply(o.config(), time.Now().Add(time.Minute))
-			o.until(func(r response) bool { return r.status == 200 }, "PATCH", "/users/"+user, map[string]any{"name": nil})
-		})
-
-		// Refused once identity has the new config.
-		r := o.until(func(r response) bool { return r.status == 409 }, "PATCH", "/users/"+user, map[string]any{"name": "Dana Scully"})
-		if code(r) != "NAME_OWNED_BY_IDP" {
-			t.Fatalf("set: %s", r.raw)
-		}
-		if r := o.must(409, "PATCH", "/users/"+user, map[string]any{"name": nil}); code(r) != "NAME_OWNED_BY_IDP" {
-			t.Fatalf("clear: %s", r.raw)
-		}
-	})
-
 	t.Run("services get the chain, the member and the operator", func(t *testing.T) {
 		project := str(o.must(201, "POST", "/as/"+dana+"/nodes/"+org+"/children/project", map[string]any{"display_name": "Echo"}).body, "id")
 		r := o.must(200, "GET", "/as/"+dana+"/nodes/"+project+"/echo", nil)

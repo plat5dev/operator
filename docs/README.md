@@ -36,8 +36,3 @@
 | Doc | |
 |-----|--|
 | [audit storage](internals/audit-storage.md) | Tables, roles, runtime |
-
-## Decisions
-
-- [Decisions](decisions/README.md): why, by topic, with references.
-- [`TODO.md`](../TODO.md): what's next, and deferred work.

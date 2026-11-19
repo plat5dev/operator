@@ -24,7 +24,7 @@ services:
       # in the token because operator-auth sets AUTH_TOKEN_EMAIL.
       AUTH_ISSUER: http://localhost:5411
       AUTH_JWKS_URI: http://operator-auth:5000/.well-known/jwks.json
-      AUTH_AUDIENCES: operator-console
+      AUTH_ALLOWED_AUDIENCES: operator-console
       AUTH_OPERATOR_ID_CLAIM: properties.user_id
       AUTH_OPERATOR_EMAIL_CLAIM: properties.email
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5412}
