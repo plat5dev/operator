@@ -35,9 +35,11 @@ On every API-port response, errors included:
 | `X-Frame-Options` | `DENY` |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` |
 
-## Boot and ready
+## Boot, reload and ready
 
-Boot refuses a missing or invalid route file, missing operator IdP config, or audit on without `AUDIT_URL`. JWKS is fetched in the background ([`reference/idp.md`](idp.md#keys)).
+Boot refuses a missing or invalid route file, missing operator IdP config, invalid signing key config, or audit on without `AUDIT_URL`. JWKS is fetched in the background ([`reference/idp.md`](idp.md#keys)).
+
+`ROUTES_FILE` can be reloaded without restarting by sending `POST /reload` on `INTERNAL_PORT` or `SIGHUP` to the process. If the updated file is unreadable, invalid, or adds node routes when `IDENTITY_URL` was not configured at boot, the gateway refuses the reload (**422** on `POST /reload`) and keeps serving the previous route table.
 
 `/health/ready` is **200** once JWKS has been fetched, otherwise **503**. Neither identity nor operator-audit is part of ready: while either is down, the requests that need it are **503** and the rest keep working.
 

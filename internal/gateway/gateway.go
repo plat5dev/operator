@@ -13,6 +13,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/plat5dev/operator/internal/apierr"
@@ -50,17 +51,25 @@ type Config struct {
 	UpstreamTimeout time.Duration
 	// Audit is nil when audit is off.
 	Audit   AuditWriter
+	// Signer is nil when upstream request signing is off.
+	Signer  *Signer
 	Metrics *metrics.Registry
 	Log     *slog.Logger
 }
 
+type routeSnapshot struct {
+	table   *routes.Table
+	proxies map[*routes.Route]*httputil.ReverseProxy
+}
+
 type Gateway struct {
-	routes          *routes.Table
+	snap            atomic.Pointer[routeSnapshot]
+	transport       *http.Transport
 	auth            Authenticator
 	identity        Identity
 	audit           AuditWriter
+	signer          *Signer
 	origins         map[string]bool
-	proxies         map[*routes.Route]*httputil.ReverseProxy
 	unauthenticated *metrics.Counter
 	log             *slog.Logger
 }
@@ -92,13 +101,21 @@ func New(cfg Config) *Gateway {
 	if reg == nil {
 		reg = metrics.NewRegistry()
 	}
+	transport := &http.Transport{
+		DialContext:           (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: cfg.UpstreamTimeout,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   64,
+		IdleConnTimeout:       90 * time.Second,
+	}
 	g := &Gateway{
-		routes:   cfg.Routes,
-		auth:     cfg.Auth,
-		identity: cfg.Identity,
-		audit:    cfg.Audit,
-		origins:  map[string]bool{},
-		proxies:  map[*routes.Route]*httputil.ReverseProxy{},
+		transport: transport,
+		auth:      cfg.Auth,
+		identity:  cfg.Identity,
+		audit:     cfg.Audit,
+		signer:    cfg.Signer,
+		origins:   map[string]bool{},
 		unauthenticated: reg.Counter("operator_unauthenticated_total",
 			"Requests answered 401, by reason. They are not audit events.", "reason"),
 		log: cfg.Log,
@@ -109,18 +126,25 @@ func New(cfg Config) *Gateway {
 	for _, o := range cfg.AllowedOrigins {
 		g.origins[strings.ToLower(o)] = true
 	}
-	transport := &http.Transport{
-		DialContext:           (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ResponseHeaderTimeout: cfg.UpstreamTimeout,
-		MaxIdleConns:          100,
-		MaxIdleConnsPerHost:   64,
-		IdleConnTimeout:       90 * time.Second,
-	}
-	for _, r := range cfg.Routes.Routes() {
-		g.proxies[r] = g.proxy(r, transport)
+	if err := g.Reload(cfg.Routes); err != nil {
+		panic(err)
 	}
 	return g
+}
+
+// Reload atomically replaces the active route table and reverse proxies.
+// If table names nodes when no identity client was configured, Reload refuses
+// the update and leaves the previous snapshot active.
+func (g *Gateway) Reload(table *routes.Table) error {
+	if table.HasNodes() && g.identity == nil {
+		return errors.New("routes name nodes but IDENTITY_URL is not configured")
+	}
+	proxies := make(map[*routes.Route]*httputil.ReverseProxy, table.Len())
+	for _, r := range table.Routes() {
+		proxies[r] = g.proxy(r, g.transport)
+	}
+	g.snap.Store(&routeSnapshot{table: table, proxies: proxies})
+	return nil
 }
 
 // forward is what the proxy sends beside the path. The proxy hooks see only the request.
@@ -157,7 +181,8 @@ func (g *Gateway) proxy(route *routes.Route, transport http.RoundTripper) *httpu
 					h.Del(k)
 				}
 			}
-			h.Set("X-Request-ID", apierr.RequestID(pr.In.Context()))
+			reqID := apierr.RequestID(pr.In.Context())
+			h.Set("X-Request-ID", reqID)
 			h.Set(operatorHeader, f.operatorID)
 			for _, n := range f.chain {
 				h.Set(kindHeader(n.Kind), n.ID)
@@ -165,6 +190,9 @@ func (g *Gateway) proxy(route *routes.Route, transport http.RoundTripper) *httpu
 			if f.member != "" {
 				h.Set(memberHeader, f.member)
 				h.Set(principalHeader, f.principal)
+			}
+			if g.signer != nil {
+				h.Set(SignatureHeader, g.signer.SignNow(pr.Out.Method, pr.Out.URL.RequestURI(), reqID, h))
 			}
 		},
 		ModifyResponse: func(res *http.Response) error {
@@ -330,9 +358,10 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 3. Check the path and match a route. Nothing is answered yet.
+	snap := g.snap.Load()
 	segs, pathErr := routes.Segments(r.URL.EscapedPath())
 	if pathErr == nil {
-		match = g.routes.Match(r.Method, segs)
+		match = snap.table.Match(r.Method, segs)
 	}
 
 	// 4. The route node's chain, and the member when acting as one. Nothing is answered yet.
@@ -378,7 +407,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if state != nil {
 		state.Forwarded = true
 	}
-	g.proxies[match.Route].ServeHTTP(w, r)
+	snap.proxies[match.Route].ServeHTTP(w, r)
 }
 
 // stripAs drops the /as/{member} prefix from an escaped path that has one.

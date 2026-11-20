@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/plat5dev/operator/internal/gateway"
 )
 
 // config is the gateway's environment. Contract: docs/reference/env.md.
@@ -25,6 +27,8 @@ type config struct {
 	UpstreamTimeout time.Duration
 	// AuditURL is operator-audit's internal base URL. Empty when audit is off.
 	AuditURL string
+	// Signer signs outgoing upstream requests when UPSTREAM_SIGNING_KEY is set.
+	Signer *gateway.Signer
 }
 
 func loadConfig(getenv func(string) string) (config, error) {
@@ -89,6 +93,19 @@ func loadConfig(getenv func(string) string) (config, error) {
 	case "false":
 	default:
 		errs = append(errs, errors.New("AUDIT_ENABLED must be true or false"))
+	}
+	signingKey := get("UPSTREAM_SIGNING_KEY", "")
+	signingKID := get("UPSTREAM_SIGNING_KEY_ID", "")
+	switch {
+	case signingKey != "":
+		s, err := gateway.NewSignerFromSeed(signingKey, signingKID)
+		if err != nil {
+			errs = append(errs, err)
+		} else {
+			c.Signer = s
+		}
+	case signingKID != "":
+		errs = append(errs, errors.New("UPSTREAM_SIGNING_KEY_ID cannot be set without UPSTREAM_SIGNING_KEY"))
 	}
 	return c, errors.Join(errs...)
 }

@@ -55,38 +55,73 @@ func run(log *slog.Logger) error {
 	go verifier.Run(ctx)
 
 	reg := metrics.NewRegistry()
-	gw := gateway.Config{
+	gwCfg := gateway.Config{
 		Routes:          table,
 		Auth:            verifier,
 		AllowedOrigins:  cfg.AllowedOrigins,
 		UpstreamTimeout: cfg.UpstreamTimeout,
+		Signer:          cfg.Signer,
 		Metrics:         reg,
 		Log:             log,
 	}
 	var auditWriter *audit.Writer
 	if cfg.IdentityURL != "" {
-		gw.Identity = identity.New(cfg.IdentityURL, nil)
+		gwCfg.Identity = identity.New(cfg.IdentityURL, nil)
 	}
 	if cfg.AuditURL != "" {
 		auditWriter = audit.New(audit.Config{URL: cfg.AuditURL, Log: log, Metrics: reg})
-		gw.Audit = auditWriter
+		gwCfg.Audit = auditWriter
 	}
+	gw := gateway.New(gwCfg)
+
+	reload := func() (int, error) {
+		next, err := routes.Load(cfg.RoutesFile)
+		if err != nil {
+			return 0, err
+		}
+		if err := gw.Reload(next); err != nil {
+			return 0, err
+		}
+		return next.Len(), nil
+	}
+
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	defer signal.Stop(hup)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-hup:
+				n, err := reload()
+				if err != nil {
+					log.Error("routes reload failed; keeping previous routes", "file", cfg.RoutesFile, "err", err)
+				} else {
+					log.Info("routes reloaded", "file", cfg.RoutesFile, "routes", n)
+				}
+			}
+		}
+	}()
 
 	api := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           gateway.New(gw),
+		Handler:           gw,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
 	internal := &http.Server{
 		Addr:              net.JoinHostPort("", cfg.InternalPort),
-		Handler:           internalRoutes(verifier, reg),
+		Handler:           internalRoutes(verifier, reg, reload, log),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 
 	log.Info("starting", "addr", cfg.Addr, "internal_port", cfg.InternalPort, "routes", table.Len(),
 		"issuer", cfg.Issuer, "identity", cfg.IdentityURL)
+	if cfg.Signer != nil {
+		log.Info("upstream request signing: on", "kid", cfg.Signer.KID())
+	}
 	if auditWriter != nil {
 		log.Info("audit: on", "url", cfg.AuditURL)
 	} else {
@@ -124,9 +159,9 @@ func run(log *slog.Logger) error {
 	return err
 }
 
-// internalRoutes serves /health/live, /health/ready, and /metrics. Ready means routes loaded
-// and JWKS fetched once. It does not probe operator-audit.
-func internalRoutes(v *auth.Verifier, reg *metrics.Registry) http.Handler {
+// internalRoutes serves /health/live, /health/ready, /metrics, and POST /reload.
+// Ready means routes loaded and JWKS fetched once. It does not probe operator-audit.
+func internalRoutes(v *auth.Verifier, reg *metrics.Registry, reload func() (int, error), log *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /metrics", reg)
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, _ *http.Request) {
@@ -138,6 +173,20 @@ func internalRoutes(v *auth.Verifier, reg *metrics.Registry) http.Handler {
 			return
 		}
 		status(w, http.StatusOK, "healthy")
+	})
+	mux.HandleFunc("POST /reload", func(w http.ResponseWriter, _ *http.Request) {
+		n, err := reload()
+		if err != nil {
+			log.Error("routes reload failed; keeping previous routes", "err", err)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		log.Info("routes reloaded", "routes", n)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "reloaded", "routes": n})
 	})
 	return mux
 }

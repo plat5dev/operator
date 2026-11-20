@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"crypto/ed25519"
+	"encoding/base64"
 	"strings"
 	"testing"
 	"time"
@@ -87,6 +90,12 @@ func TestConfigErrors(t *testing.T) {
 		"no audit url":     {"AUDIT_URL": ""},
 		"bad audit url":    {"AUDIT_URL": "operator-audit:8005"},
 		"audit enabled no": {"AUDIT_ENABLED": "no"},
+		"orphan kid":       {"UPSTREAM_SIGNING_KEY_ID": "k-1"},
+		"bad signing key":  {"UPSTREAM_SIGNING_KEY": "not-valid"},
+		"bad signing kid": {
+			"UPSTREAM_SIGNING_KEY":    base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{3}, ed25519.SeedSize)),
+			"UPSTREAM_SIGNING_KEY_ID": "bad kid",
+		},
 	}
 	for name, over := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -98,5 +107,25 @@ func TestConfigErrors(t *testing.T) {
 				t.Fatal("want error")
 			}
 		})
+	}
+}
+
+func TestConfigSigning(t *testing.T) {
+	m := base()
+	m["UPSTREAM_SIGNING_KEY"] = base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{5}, ed25519.SeedSize))
+	c, err := loadConfig(env(m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Signer == nil || len(c.Signer.KID()) != 16 {
+		t.Fatalf("unexpected signer: %+v", c.Signer)
+	}
+	m["UPSTREAM_SIGNING_KEY_ID"] = "op-2026"
+	c, err = loadConfig(env(m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Signer == nil || c.Signer.KID() != "op-2026" {
+		t.Fatalf("unexpected kid: %+v", c.Signer)
 	}
 }
