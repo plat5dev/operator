@@ -60,13 +60,17 @@ services:
 		Log:             slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 
-	req := httptest.NewRequest("POST", "/as/"+danaID+"/projects/"+projectID+"/items?dry_run=1", nil)
+	req := httptest.NewRequest("POST", "/projects/"+projectID+"/items?dry_run=1", nil)
 	req.Header.Set("Authorization", "Bearer good")
+	req.Header.Set(asMemberHeader, danaID)
 	req.Header.Set("X-Plat5-Signature", "v1,kid=forged,t=1,sig=forged")
 	res := httptest.NewRecorder()
 	gw.ServeHTTP(res, req)
 	if res.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", res.Code, res.Body.String())
+	}
+	if gotHeaders.Get(asMemberHeader) != "" {
+		t.Fatalf("%s reached upstream", asMemberHeader)
 	}
 
 	parts := strings.Split(gotSig, ",")

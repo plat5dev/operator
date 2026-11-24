@@ -42,14 +42,14 @@ DANA=$(op -X POST http://localhost:5410/nodes/$ORG/members \
   -d '{"idp":{"issuer":"http://localhost:5401","subject":"dana"},"role":"member"}' | jq -r .id)
 
 # Created as Dana: she gets creator_role on the project.
-PROJECT=$(op -X POST http://localhost:5410/as/$DANA/nodes/$ORG/children/project -d '{"display_name":"Apps"}' | jq -r .id)
+PROJECT=$(op -X POST -H "X-Plat5-As-Member: $DANA" http://localhost:5410/nodes/$ORG/children/project -d '{"display_name":"Apps"}' | jq -r .id)
 op "http://localhost:5410/nodes/$PROJECT/bindings?inherited=false" | jq
 
 # The person behind the member.
 op http://localhost:5410/members/$DANA/user | jq
 
 # What a service is sent: the chain, the member, the operator. No credential.
-op http://localhost:5410/as/$DANA/nodes/$PROJECT/echo
+op -H "X-Plat5-As-Member: $DANA" http://localhost:5410/nodes/$PROJECT/echo
 ```
 
 Every authenticated call is in the operator audit log, including reads of the log. Read it for the org and everything below it:

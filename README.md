@@ -2,7 +2,7 @@
 
 Headless gateway for a Plat5 deployment's operators. Operators authenticate with your operator IdP and call the same private service APIs Plat5's gateway fronts, by node id.
 
-Plat5's gateway resolves slugs and sends services the caller's member id. This gateway checks an operator JWT, looks up the route node's chain in Plat5 identity, records the request in the operator audit log, then forwards the service's own path with the chain and `X-Plat5-Operator-Id`. An operator can act as a member (`/as/{member}/…`) on routes that allow it, so what they write is authored by a real member of the tree. The record of who did what is the operator audit log, which `operator-audit` (also in this repo) keeps in the operator plane's Postgres.
+Plat5's gateway resolves slugs and sends services the caller's member id. This gateway checks an operator JWT, looks up the route node's chain in Plat5 identity, records the request in the operator audit log, then forwards the service's own path with the chain and `X-Plat5-Operator-Id`. An operator can act as a member (`X-Plat5-As-Member: <member_id>`) on routes that allow it, so what they write is authored by a real member of the tree. The record of who did what is the operator audit log, which `operator-audit` (also in this repo) keeps in the operator plane's Postgres.
 
 Not part of the plat5 repo, and imports none of its code. Doesn't call Plat5's gateway. Serves no UI; a console is a separate client.
 
@@ -26,7 +26,7 @@ Gateway API on `:5004` (`:5410` in dev compose), health and metrics on `:8004`. 
 | `cmd/operator/` | Gateway binary and config |
 | `cmd/operator-audit/` | Audit service binary: `migrate` and `serve` |
 | `internal/auth/` | Operator JWT validation |
-| `internal/routes/` | Route file and matching, `/as/{member}` included |
+| `internal/routes/` | Route file and matching |
 | `internal/identity/` | Plat5 identity client: node chains and member checks |
 | `internal/gateway/` | Request order, forwarding, request log |
 | `internal/audit/` | The gateway's audit writes: intent before forward, outcome after |

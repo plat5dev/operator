@@ -20,7 +20,7 @@ Neither gateway calls the other. This gateway serves no UI, stores no accounts, 
 | **Route** | A service path this gateway forwards, from its own route list ([`reference/routes.md`](../reference/routes.md)) |
 | **Route node** | The path param holding the Plat5 node a route addresses (`node`) |
 | **Chain** | The route node and its ancestors, root first, as Plat5 identity has them. The service gets it as `X-Plat5-<Kind>-Id` headers, as from Plat5's gateway |
-| **Acting as a member** | `/as/{member}` before a route's path. The service is told that member's id, so what the request writes is authored by a real member of the tree ([requests](requests.md#acting-as-a-member)) |
+| **Acting as a member** | `X-Plat5-As-Member: <member_id>` on a route that allows it. The service is told that member's id, so what the request writes is authored by a real member of the tree ([requests](requests.md#acting-as-a-member)) |
 | **Operator audit log** | One event per authenticated request, in the operator plane's own Postgres ([`concepts/audit.md`](audit.md)). Not a Plat5 log |
 | **Console** | A client of this API, in its own repo |
 
@@ -43,7 +43,7 @@ The operator id is not a customer member, not a principal, and not a customer Id
 1. **The operator is the actor; the path is the target.** Node ids in the path, never slugs. The operator id is never in the path.
 2. **A second front door, not a mode of Plat5.** This gateway dials services with its own route list. It doesn't call Plat5's gateway or control plane, and it uses Plat5 only through its public, documented service APIs.
 3. **Services are told what Plat5's gateway would tell them, and no more.** The route node's chain; a member id and its principal only when acting as a member; and the operator in this plane's own header, `X-Plat5-Operator-Id`.
-4. **A member id only by saying so.** `/as/{member}`, on a route that allows it, for a member active in the route node's tree. Access is still the operator's, never the member's.
+4. **A member id only by saying so.** `X-Plat5-As-Member`, on a route that allows it, for a member active in the route node's tree. Access is still the operator's, never the member's.
 5. **Every authenticated request is recorded before it's answered.** Audit is on or off for the deployment, and on by default.
 6. **The operator IdP is the only source of who is an operator.** No accounts, passwords, or sessions here.
 7. **Narrowing who may call is a decision service's job.** Any authenticated operator may call any route today. No role, group, or allow-list check goes into this gateway.
@@ -55,7 +55,7 @@ The operator id is not a customer member, not a principal, and not a customer Id
 | Who is this operator? | The operator IdP, from the token |
 | Which node? | The path; Plat5 identity, for its chain |
 | May this operator call this route? | Any authenticated operator may, today |
-| Who authored a write? | The member acted as, when the path says `/as/{member}`; otherwise nobody |
+| Who authored a write? | The member acted as, when the request sends `X-Plat5-As-Member`; otherwise nobody |
 | Who did it? | The operator audit log |
 | Is it valid for the resource's current state? | The service |
 

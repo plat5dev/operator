@@ -147,6 +147,11 @@ func (o *operator) mint() (string, error) {
 
 func (o *operator) call(method, path string, body any) response {
 	o.t.Helper()
+	return o.callAs("", method, path, body)
+}
+
+func (o *operator) callAs(member, method, path string, body any) response {
+	o.t.Helper()
 	var r io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -163,6 +168,9 @@ func (o *operator) call(method, path string, body any) response {
 		req.Header.Set("Authorization", "Bearer "+o.token)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if member != "" {
+		req.Header.Set("X-Plat5-As-Member", member)
+	}
 	// A client can't name a member, a node or an operator.
 	req.Header.Set("X-Plat5-Member-Id", forgedMemberID)
 	req.Header.Set("X-Plat5-Operator-Id", "forged")
@@ -180,7 +188,12 @@ func (o *operator) call(method, path string, body any) response {
 // must calls and fails unless the status is want.
 func (o *operator) must(want int, method, path string, body any) response {
 	o.t.Helper()
-	r := o.call(method, path, body)
+	return o.mustAs(want, "", method, path, body)
+}
+
+func (o *operator) mustAs(want int, member, method, path string, body any) response {
+	o.t.Helper()
+	r := o.callAs(member, method, path, body)
 	if r.status != want {
 		o.t.Fatalf("%s %s: %d, want %d: %s", method, path, r.status, want, r.raw)
 	}
@@ -237,7 +250,7 @@ func TestOperator(t *testing.T) {
 	}
 
 	t.Run("acting as a member authors the write", func(t *testing.T) {
-		project := str(o.must(201, "POST", "/as/"+dana+"/nodes/"+org+"/children/project", map[string]any{"display_name": "Apps"}).body, "id")
+		project := str(o.mustAs(201, dana, "POST", "/nodes/"+org+"/children/project", map[string]any{"display_name": "Apps"}).body, "id")
 		var found bool
 		for _, b := range list(o.must(200, "GET", "/nodes/"+project+"/bindings?inherited=false", nil), "bindings") {
 			if str(b, "member_id") == dana && str(b, "role") == "admin" {
@@ -260,7 +273,7 @@ func TestOperator(t *testing.T) {
 		}
 
 		// A filtered list, as the member: what Dana can read. Without a member, the full list.
-		if seen := ids(list(o.must(200, "GET", "/as/"+dana+"/nodes/"+org+"/children/project", nil), "nodes")); !seen[project] || seen[bare] {
+		if seen := ids(list(o.mustAs(200, dana, "GET", "/nodes/"+org+"/children/project", nil), "nodes")); !seen[project] || seen[bare] {
 			t.Fatalf("Dana sees %v", seen)
 		}
 		if seen := ids(list(o.must(200, "GET", "/nodes/"+org+"/children/project", nil), "nodes")); !seen[project] || !seen[bare] {
@@ -274,7 +287,7 @@ func TestOperator(t *testing.T) {
 		e := events[0]
 		acting, _ := e["acting_as"].(map[string]any)
 		if str(acting, "member_id") != dana || str(acting, "principal") != "person" || str(e, "root_id") != org ||
-			str(e, "route") != "/as/{member}/nodes/{node_id}/children/{kind}" || str(e, "created_id") != project ||
+			str(e, "route") != "/nodes/{node_id}/children/{kind}" || str(e, "created_id") != project ||
 			str(e, "outcome") != "responded" {
 			t.Fatalf("event %v", e)
 		}
@@ -316,8 +329,8 @@ func TestOperator(t *testing.T) {
 	})
 
 	t.Run("services get the chain, the member and the operator", func(t *testing.T) {
-		project := str(o.must(201, "POST", "/as/"+dana+"/nodes/"+org+"/children/project", map[string]any{"display_name": "Echo"}).body, "id")
-		r := o.must(200, "GET", "/as/"+dana+"/nodes/"+project+"/echo", nil)
+		project := str(o.mustAs(201, dana, "POST", "/nodes/"+org+"/children/project", map[string]any{"display_name": "Echo"}).body, "id")
+		r := o.mustAs(200, dana, "GET", "/nodes/"+project+"/echo", nil)
 		// whoami prints the request line and headers it received.
 		for _, want := range []string{
 			"GET /nodes/" + project + "/echo ",
@@ -330,7 +343,7 @@ func TestOperator(t *testing.T) {
 				t.Errorf("echo lacks %q:\n%s", want, r.raw)
 			}
 		}
-		for _, never := range []string{"Authorization:", forgedMemberID, "X-Plat5-Operator-Id: forged"} {
+		for _, never := range []string{"Authorization:", "X-Plat5-As-Member:", forgedMemberID, "X-Plat5-Operator-Id: forged"} {
 			if strings.Contains(r.raw, never) {
 				t.Errorf("echo has %q:\n%s", never, r.raw)
 			}
@@ -339,7 +352,7 @@ func TestOperator(t *testing.T) {
 			t.Errorf("echo lacks the operator:\n%s", r.raw)
 		}
 
-		// Without /as/, the chain and the operator only.
+		// Without X-Plat5-As-Member, the chain and the operator only.
 		r = o.must(200, "GET", "/nodes/"+project+"/echo", nil)
 		if strings.Contains(r.raw, "X-Plat5-Member-Id") || strings.Contains(r.raw, "X-Plat5-Principal") ||
 			!strings.Contains(r.raw, "X-Plat5-Project-Id: "+project) {
@@ -349,16 +362,16 @@ func TestOperator(t *testing.T) {
 
 	t.Run("a member must be active in the node's tree", func(t *testing.T) {
 		other := str(o.must(201, "POST", "/roots/organization", map[string]any{"display_name": "Other " + suffix}).body, "id")
-		o.must(400, "POST", "/as/"+dana+"/nodes/"+other+"/children/project", map[string]any{"display_name": "Nope"})
+		o.mustAs(400, dana, "POST", "/nodes/"+other+"/children/project", map[string]any{"display_name": "Nope"})
 
 		gone := str(o.must(201, "POST", "/nodes/"+org+"/members", map[string]any{
 			"idp":  map[string]any{"issuer": "http://localhost:5401", "subject": "e2e-gone-" + suffix},
 			"role": "member",
 		}).body, "id")
 		o.must(204, "DELETE", "/nodes/"+org+"/members/"+gone, nil)
-		o.must(400, "POST", "/as/"+gone+"/nodes/"+org+"/children/project", map[string]any{"display_name": "Nope"})
+		rejected := o.mustAs(400, gone, "POST", "/nodes/"+org+"/children/project", map[string]any{"display_name": "Nope"})
 
-		events := list(o.must(200, "GET", "/operator-audit-events?params%5Bmember%5D="+gone, nil), "audit_events")
+		events := list(o.must(200, "GET", "/operator-audit-events?request_id="+rejected.header.Get("X-Request-ID"), nil), "audit_events")
 		if len(events) != 1 || str(events[0], "outcome") != "rejected" || events[0]["acting_as"] != nil ||
 			events[0]["status"] != float64(400) {
 			t.Fatalf("events %v", events)
@@ -366,7 +379,7 @@ func TestOperator(t *testing.T) {
 	})
 
 	t.Run("delete and restore a project", func(t *testing.T) {
-		project := str(o.must(201, "POST", "/as/"+dana+"/nodes/"+org+"/children/project", map[string]any{"display_name": "Doomed"}).body, "id")
+		project := str(o.mustAs(201, dana, "POST", "/nodes/"+org+"/children/project", map[string]any{"display_name": "Doomed"}).body, "id")
 		o.must(204, "DELETE", "/nodes/"+project, nil)
 		deleted := o.must(200, "GET", "/nodes?parent_id="+org+"&status=deleted", nil)
 		if !ids(list(deleted, "nodes"))[project] {
@@ -396,8 +409,8 @@ func TestOperator(t *testing.T) {
 			}
 		}
 		for _, want := range []string{
-			"/nodes/{root_id}/members", "/as/{member}/nodes/{node_id}/children/{kind}",
-			"/nodes/{node_id}/bindings", "/as/{member}/nodes/{node_id}/echo", "/nodes/{node_id}/restore",
+			"/nodes/{root_id}/members", "/nodes/{node_id}/children/{kind}",
+			"/nodes/{node_id}/bindings", "/nodes/{node_id}/echo", "/nodes/{node_id}/restore",
 		} {
 			if !routes[want] {
 				t.Errorf("no event for %s under the org", want)

@@ -26,7 +26,7 @@ type Actor struct {
 	ClientID   *string `json:"client_id"`
 }
 
-// ActingAs is the member an /as/{member} request acted as.
+// ActingAs is the member an X-Plat5-As-Member request acted as.
 type ActingAs struct {
 	MemberID  string `json:"member_id"`
 	Principal string `json:"principal"`

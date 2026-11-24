@@ -48,7 +48,7 @@ services:
 | `path` | Template. Literal segments and `{name}` params; a param matches exactly one non-empty segment. The service's own path |
 | `methods` | A list of verbs, or a map of verb to `null` or its [settings](#method-fields), as Plat5's `methods` (Plat5 `docs/reference/config/services.md`). A list is a map with no overrides. `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, each once. `OPTIONS` isn't allowed: preflight is answered here |
 | `node` | Optional. The param holding the Plat5 node id this route addresses. Its chain is looked up in identity, sent as headers and recorded ([the route node](../concepts/requests.md#the-route-node)) |
-| `as_member` | Optional, default `false`. `true` also serves the route's verbs at `/as/{member}` + `path` ([acting as a member](../concepts/requests.md#acting-as-a-member)). The plain path stays served, without a member |
+| `as_member` | Optional, default `false`. `true` allows callers to send `X-Plat5-As-Member` on the route's verbs ([acting as a member](../concepts/requests.md#acting-as-a-member)). Without the header, the route runs with no member |
 
 ### Method fields
 
@@ -56,17 +56,15 @@ services:
 |-------|------|
 | `as_member` | Optional. Overrides the route's for this verb |
 
-A verb served at `/as/{member}` needs the route's `node`: the member is checked in the node's tree. Unknown fields, in a route or a verb's settings, refuse boot.
+A verb with `as_member: true` needs the route's `node`: the member is checked in the node's tree. Unknown fields, in a route or a verb's settings, refuse boot.
 
 ## Matching
 
 A request matches a route when every segment matches and the method is listed. A method that isn't listed is **404**, the same as a missing path.
 
-A path starting with `/as/{member}/` matches only a route whose verb has `as_member: true`, against the rest of the path. `as` is reserved as a first segment: a route whose path starts with `/as/` refuses boot.
-
 Boot refuses a file where one request could match two routes, in the same service or different ones. That includes a literal and a param in the same position, e.g. `/nodes/search` beside `/nodes/{node_id}`. There is no precedence rule to learn.
 
-Param names are unique within a path and match `[a-z][a-z0-9_]*`. `member` is reserved for the `/as/` prefix. They are the names in audit events and the request log. Params are bare (`{node_id}`), never dotted (`{project.id}`): in Plat5 a dot is a value its gateway fills in, and this gateway forwards the path unchanged and fills nothing.
+Param names are unique within a path and match `[a-z][a-z0-9_]*`. They are the names in audit events and the request log. Params are bare (`{node_id}`), never dotted (`{project.id}`): in Plat5 a dot is a value its gateway fills in, and this gateway forwards the path unchanged and fills nothing.
 
 ## Identity
 
@@ -80,4 +78,4 @@ Left out on purpose: creating keys (`POST …/keys`), which mints customer crede
 
 ## Reserved
 
-`/health/live`, `/health/ready` and `/metrics` are served on `INTERNAL_PORT`, not the API port. On the API port, `/as/` is the only reserved prefix. Every other path is a route or a **404**.
+`/health/live`, `/health/ready` and `/metrics` are served on `INTERNAL_PORT`, not the API port. On the API port, every path is a route or a **404**.

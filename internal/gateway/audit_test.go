@@ -82,8 +82,9 @@ func TestAuditForwarded(t *testing.T) {
 		_, _ = io.WriteString(w, `{"id":"01jbx9x9b1c3d5e7f9g1h3j5k7"}`)
 	})
 	h, _ := setupWith(t, up.srv.URL, fakeAuth{}, 0, rec, nil)
-	w := do(h, "POST", "/as/"+danaID+"/nodes/"+projectID+"/children/env?q=secret", map[string]string{
+	w := do(h, "POST", "/nodes/"+projectID+"/children/env?q=secret", map[string]string{
 		"Authorization":     "Bearer good",
+		asMemberHeader:      danaID,
 		"User-Agent":        "console/1.0",
 		audit.DetailsHeader: `{"forged":true}`,
 	})
@@ -113,8 +114,8 @@ func TestAuditForwarded(t *testing.T) {
 		},
 		"service":    "identity",
 		"method":     "POST",
-		"route":      "/as/{member}/nodes/{node_id}/children/{kind}",
-		"params":     map[string]any{"member": danaID, "node_id": projectID, "kind": "env"},
+		"route":      "/nodes/{node_id}/children/{kind}",
+		"params":     map[string]any{"node_id": projectID, "kind": "env"},
 		"path":       nil,
 		"ip":         "192.0.2.1",
 		"user_agent": "console/1.0",
@@ -133,28 +134,34 @@ func TestAuditForwarded(t *testing.T) {
 
 func TestAuditRejected(t *testing.T) {
 	cases := []struct {
-		name, method, path string
-		status             int
+		name, method, path, asMember string
+		status                       int
 		// wantPath is set when no route matched.
 		wantPath string
 		nodes    int
 		actingAs bool
 	}{
-		{"unacceptable path", "GET", "/nodes/x/../" + orgID + "/members", 400, "/nodes/x/../" + orgID + "/members", 0, false},
-		{"no route", "GET", "/users/" + userID + "/memberships", 404, "/users/" + userID + "/memberships", 0, false},
-		{"method not listed", "DELETE", "/nodes", 404, "/nodes", 0, false},
-		{"as on a route without as_member", "GET", "/as/" + danaID + "/nodes/" + orgID, 404, "/as/" + danaID + "/nodes/" + orgID, 0, false},
-		{"node not found", "GET", "/nodes/" + missingNodeID, 404, "", 0, false},
-		{"member not active", "POST", "/as/" + goneMemberID + "/nodes/" + projectID + "/children/env", 400, "", 2, false},
-		{"identity down", "GET", "/nodes/" + downNodeID, 503, "", 0, false},
-		{"identity down for the member", "POST", "/as/" + downMemberID + "/nodes/" + projectID + "/children/env", 503, "", 0, false},
+		{"unacceptable path", "GET", "/nodes/x/../" + orgID + "/members", "", 400, "/nodes/x/../" + orgID + "/members", 0, false},
+		{"no route", "GET", "/users/" + userID + "/memberships", "", 404, "/users/" + userID + "/memberships", 0, false},
+		{"method not listed", "DELETE", "/nodes", "", 404, "/nodes", 0, false},
+		{"as header on a route without as_member", "GET", "/nodes/" + orgID, danaID, 400, "", 1, false},
+		{"as header on a route without node", "GET", "/nodes", danaID, 400, "", 0, false},
+		{"as header malformed", "POST", "/nodes/" + projectID + "/children/env", "a/b", 400, "", 2, false},
+		{"node not found", "GET", "/nodes/" + missingNodeID, "", 404, "", 0, false},
+		{"member not active", "POST", "/nodes/" + projectID + "/children/env", goneMemberID, 400, "", 2, false},
+		{"identity down", "GET", "/nodes/" + downNodeID, "", 503, "", 0, false},
+		{"identity down for the member", "POST", "/nodes/" + projectID + "/children/env", downMemberID, 503, "", 0, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			rec := &recordingAudit{}
 			up := newUpstream(t, nil)
 			h, _ := setupWith(t, up.srv.URL, fakeAuth{}, 0, rec, nil)
-			w := do(h, c.method, c.path, map[string]string{"Authorization": "Bearer good"})
+			hdr := map[string]string{"Authorization": "Bearer good"}
+			if c.asMember != "" {
+				hdr[asMemberHeader] = c.asMember
+			}
+			w := do(h, c.method, c.path, hdr)
 			if w.Code != c.status {
 				t.Fatalf("status %d", w.Code)
 			}

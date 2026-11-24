@@ -11,7 +11,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
-	"net/url"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -76,12 +75,16 @@ type Gateway struct {
 
 const (
 	plat5Prefix      = "X-Plat5-"
+	asMemberHeader   = "X-Plat5-As-Member"
 	operatorHeader   = "X-Plat5-Operator-Id"
 	memberHeader     = "X-Plat5-Member-Id"
 	principalHeader  = "X-Plat5-Principal"
 	preflightMethods = "GET, HEAD, POST, PUT, PATCH, DELETE"
-	preflightHeaders = "Authorization, Content-Type, X-Request-ID, traceparent"
+	preflightHeaders = "Authorization, Content-Type, X-Plat5-As-Member, X-Request-ID, traceparent"
+	maxMemberIDLen   = 256
 )
+
+var errBadAsMember = errors.New("invalid or disallowed X-Plat5-As-Member header")
 
 // Credentials the upstream never sees. Every incoming X-Plat5-* header goes too.
 var stripped = []string{"Authorization", "Cookie", "X-API-Key"}
@@ -153,8 +156,6 @@ type forward struct {
 	chain      []identity.Node
 	// member and principal are set when acting as a member.
 	member, principal string
-	// path is the escaped path to send: the request's, without /as/{member}.
-	path string
 }
 
 type forwardKey struct{}
@@ -167,10 +168,6 @@ func (g *Gateway) proxy(route *routes.Route, transport http.RoundTripper) *httpu
 			f := pr.In.Context().Value(forwardKey{}).(*forward)
 			// SetURL keeps the escaped request path and query exactly as received.
 			pr.SetURL(target)
-			if f.path != pr.In.URL.EscapedPath() {
-				pr.Out.URL.RawPath = f.path
-				pr.Out.URL.Path, _ = url.PathUnescape(f.path)
-			}
 			h := pr.Out.Header
 			for _, k := range stripped {
 				h.Del(k)
@@ -266,17 +263,39 @@ func (r resolved) found() []identity.Node {
 
 // resolve looks up the route node's chain and, acting as a member, the member in the
 // chain's root. It answers nothing: the intent is written first.
-func (g *Gateway) resolve(ctx context.Context, id string, m *routes.Match) resolved {
+func (g *Gateway) resolve(ctx context.Context, id string, m *routes.Match, member string) resolved {
 	var res resolved
 	if m == nil || m.Route.Node == "" {
 		return res
 	}
 	res.chain, res.err = g.identity.Chain(ctx, m.NodeID(), id)
-	if res.err != nil || m.Member == "" {
+	if res.err != nil || member == "" {
 		return res
 	}
-	res.principal, res.err = g.identity.Member(ctx, res.chain[0].ID, m.Member, id)
+	res.principal, res.err = g.identity.Member(ctx, res.chain[0].ID, member, id)
 	return res
+}
+
+// parseAsMember reads X-Plat5-As-Member. Absent returns "", nil. Repeated, empty,
+// or non-path-segment values return errBadAsMember.
+func parseAsMember(h http.Header) (string, error) {
+	vals := h.Values(asMemberHeader)
+	if len(vals) == 0 {
+		return "", nil
+	}
+	if len(vals) > 1 {
+		return "", errBadAsMember
+	}
+	v := strings.TrimSpace(vals[0])
+	if v == "" || len(v) > maxMemberIDLen || v == "." || v == ".." {
+		return "", errBadAsMember
+	}
+	for i := 0; i < len(v); i++ {
+		if v[i] <= 0x20 || v[i] > 0x7e || v[i] == '/' || v[i] == '\\' || v[i] == '?' || v[i] == '#' {
+			return "", errBadAsMember
+		}
+	}
+	return v, nil
 }
 
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -303,10 +322,11 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var (
-		op    *auth.Operator
-		match *routes.Match
-		res   resolved
-		state *audit.State
+		op       *auth.Operator
+		match    *routes.Match
+		asMember string
+		res      resolved
+		state    *audit.State
 	)
 	defer func() {
 		rv := recover()
@@ -319,7 +339,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if state != nil {
 			g.audit.SendOutcome(id, audit.OutcomeFor(state, rec.status, rec.bytes))
 		}
-		g.logRequest(r, id, op, match, res, rec.status, time.Since(start))
+		g.logRequest(r, id, op, match, asMember, res, rec.status, time.Since(start))
 		if rv == http.ErrAbortHandler {
 			panic(rv)
 		}
@@ -357,21 +377,30 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. Check the path and match a route. Nothing is answered yet.
+	// 3. Check the path, match a route, and read X-Plat5-As-Member. Nothing is answered yet.
 	snap := g.snap.Load()
 	segs, pathErr := routes.Segments(r.URL.EscapedPath())
+	var asMemberErr error
+	asMember, asMemberErr = parseAsMember(r.Header)
 	if pathErr == nil {
 		match = snap.table.Match(r.Method, segs)
+		if match != nil && asMemberErr == nil && asMember != "" && !match.AsMember {
+			asMemberErr = errBadAsMember
+		}
 	}
 
 	// 4. The route node's chain, and the member when acting as one. Nothing is answered yet.
-	res = g.resolve(r.Context(), id, match)
+	resolveMember := ""
+	if asMemberErr == nil {
+		resolveMember = asMember
+	}
+	res = g.resolve(r.Context(), id, match, resolveMember)
 
 	// 5. Nothing past authentication answers until the audit intent is written.
 	if g.audit != nil {
 		state = &audit.State{}
 		r = r.WithContext(audit.WithState(r.Context(), state))
-		if err := g.audit.WriteIntent(r.Context(), intent(r, id, start, op, match, res)); err != nil {
+		if err := g.audit.WriteIntent(r.Context(), intent(r, id, start, op, match, asMember, res)); err != nil {
 			apierr.Unavailable(w, r)
 			return
 		}
@@ -384,6 +413,9 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case match == nil:
 		apierr.NotFound(w, r)
+		return
+	case asMemberErr != nil:
+		apierr.InvalidRequest(w, r)
 		return
 	case errors.Is(res.err, identity.ErrNotFound):
 		apierr.NotFoundResource(w, r, "node", match.NodeID())
@@ -398,10 +430,9 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 7. Forward.
-	f := &forward{operatorID: op.ID, chain: res.chain, path: r.URL.EscapedPath()}
-	if match.Member != "" {
-		f.member, f.principal = match.Member, res.principal
-		f.path = stripAs(f.path)
+	f := &forward{operatorID: op.ID, chain: res.chain}
+	if asMember != "" {
+		f.member, f.principal = asMember, res.principal
 	}
 	r = r.WithContext(context.WithValue(r.Context(), forwardKey{}, f))
 	if state != nil {
@@ -410,27 +441,13 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	snap.proxies[match.Route].ServeHTTP(w, r)
 }
 
-// stripAs drops the /as/{member} prefix from an escaped path that has one.
-func stripAs(escaped string) string {
-	// "/as/{member}/rest": the third slash starts the rest.
-	n := 0
-	for i := 0; i < len(escaped); i++ {
-		if escaped[i] == '/' {
-			if n++; n == 3 {
-				return escaped[i:]
-			}
-		}
-	}
-	return escaped
-}
-
 func (g *Gateway) unauthorized(w http.ResponseWriter, r *http.Request, reason string) {
 	g.unauthenticated.Inc(reason)
 	apierr.Unauthorized(w, r, reason)
 }
 
 // intent is everything known about the request before it is answered or forwarded.
-func intent(r *http.Request, id string, at time.Time, op *auth.Operator, m *routes.Match, res resolved) *audit.Intent {
+func intent(r *http.Request, id string, at time.Time, op *auth.Operator, m *routes.Match, member string, res resolved) *audit.Intent {
 	in := &audit.Intent{
 		RequestID:  id,
 		OccurredAt: audit.Timestamp(at),
@@ -464,7 +481,7 @@ func intent(r *http.Request, id string, at time.Time, op *auth.Operator, m *rout
 		in.RootID = &root
 	}
 	if res.principal != "" {
-		in.ActingAs = &audit.ActingAs{MemberID: m.Member, Principal: res.principal}
+		in.ActingAs = &audit.ActingAs{MemberID: member, Principal: res.principal}
 	}
 	return in
 }
@@ -477,7 +494,7 @@ func optional(s string, maxBytes int) *string {
 	return &s
 }
 
-func (g *Gateway) logRequest(r *http.Request, id string, op *auth.Operator, m *routes.Match, res resolved, status int, d time.Duration) {
+func (g *Gateway) logRequest(r *http.Request, id string, op *auth.Operator, m *routes.Match, member string, res resolved, status int, d time.Duration) {
 	attrs := []any{
 		"request_id", id,
 		"method", r.Method,
@@ -499,7 +516,7 @@ func (g *Gateway) logRequest(r *http.Request, id string, op *auth.Operator, m *r
 			attrs = append(attrs, "root_id", chain[0].ID, "node_id", chain[len(chain)-1].ID)
 		}
 		if res.principal != "" {
-			attrs = append(attrs, "member_id", m.Member)
+			attrs = append(attrs, "member_id", member)
 		}
 	}
 	g.log.Info("request", attrs...)

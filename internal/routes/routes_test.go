@@ -94,9 +94,6 @@ func TestParseErrors(t *testing.T) {
 		"options":                 one("      - path: /a\n        methods: [OPTIONS]\n"),
 		"lowercase method":        one("      - path: /a\n        methods: [get]\n"),
 		"repeated method":         one("      - path: /a\n        methods: [GET, GET]\n"),
-		"reserved as":             one("      - path: /as/{id}/a\n        methods: [GET]\n"),
-		"reserved as alone":       one("      - path: /as\n        methods: [GET]\n"),
-		"reserved member":         one("      - path: /a/{member}\n        methods: [GET]\n"),
 		"node not a param":        one("      - path: /a/{id}\n        node: other\n        methods: [GET]\n"),
 		"node a literal":          one("      - path: /a/{id}\n        node: a\n        methods: [GET]\n"),
 		"as_member without node":  one("      - path: /a/{id}\n        as_member: true\n        methods: [GET]\n"),
@@ -124,7 +121,7 @@ func TestParseErrors(t *testing.T) {
 	}
 }
 
-// A verb's settings override the route's: one path, a verb served as a member beside one that isn't.
+// A verb's settings override the route's: one path, a verb allowing X-Plat5-As-Member beside one that doesn't.
 func TestMethodsMap(t *testing.T) {
 	tab, err := Parse([]byte(one(`      - path: /projects/{project_id}/plans
         node: project_id
@@ -143,18 +140,34 @@ func TestMethodsMap(t *testing.T) {
 		t.Fatal(err)
 	}
 	plans, plan := "/projects/"+nodeID+"/plans", "/projects/"+nodeID+"/plans/pro"
-	as := "/as/" + memberID
 	for _, c := range []struct {
-		method, path string
-		want         bool
+		method, path   string
+		want, asMember bool
 	}{
-		{"GET", plans, true}, {"POST", plans, true}, {"POST", as + plans, true}, {"GET", as + plans, false},
-		{"GET", plan, true}, {"GET", as + plan, false}, {"PATCH", as + plan, true}, {"DELETE", as + plan, true},
-		{"PUT", plan, false},
+		{"GET", plans, true, false}, {"POST", plans, true, true},
+		{"GET", plan, true, false}, {"PATCH", plan, true, true}, {"DELETE", plan, true, true},
+		{"PUT", plan, false, false},
 	} {
-		if got := match(t, tab, c.method, c.path) != nil; got != c.want {
-			t.Errorf("%s %s: matched %v, want %v", c.method, c.path, got, c.want)
+		m := match(t, tab, c.method, c.path)
+		if (m != nil) != c.want {
+			t.Errorf("%s %s: matched %v, want %v", c.method, c.path, m != nil, c.want)
+			continue
 		}
+		if m != nil && m.AsMember != c.asMember {
+			t.Errorf("%s %s: as_member %v, want %v", c.method, c.path, m.AsMember, c.asMember)
+		}
+	}
+}
+
+func TestAsAndMemberNotReserved(t *testing.T) {
+	in := one("      - path: /as/{member}/items\n        methods: [GET]\n")
+	tab, err := Parse([]byte(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := match(t, tab, "GET", "/as/"+memberID+"/items")
+	if m == nil || m.Params["member"] != memberID {
+		t.Fatalf("match = %+v", m)
 	}
 }
 
@@ -210,7 +223,7 @@ func TestShippedFiles(t *testing.T) {
 			t.Errorf("GET %s is not routed", p)
 		}
 	}
-	if m := match(t, shipped, "POST", "/as/"+memberID+"/nodes/"+nodeID+"/children/project"); m == nil || m.Member != memberID {
+	if m := match(t, shipped, "POST", "/nodes/"+nodeID+"/children/project"); m == nil || !m.AsMember {
 		t.Fatalf("children as a member: %+v", m)
 	}
 }
@@ -246,24 +259,22 @@ func TestMatch(t *testing.T) {
 		method, path string
 		template     string
 		params       map[string]string
-		member, node string
+		asMember     bool
+		node         string
 	}{
-		{"GET", "/nodes", "/nodes", nil, "", ""},
+		{"GET", "/nodes", "/nodes", nil, false, ""},
 		{"GET", "/nodes/" + nodeID + "/children/project", "/nodes/{node_id}/children/{kind}",
-			map[string]string{"node_id": nodeID, "kind": "project"}, "", nodeID},
-		{"POST", "/as/" + memberID + "/nodes/" + nodeID + "/children/project", "/as/{member}/nodes/{node_id}/children/{kind}",
-			map[string]string{"member": memberID, "node_id": nodeID, "kind": "project"}, memberID, nodeID},
-		{"POST", "/nodes/search", "/nodes/search", nil, "", ""},
-		{"GET", "/nodes/search", "/nodes/{node_id}", map[string]string{"node_id": "search"}, "", "search"},
-		{"GET", "/nodes/n%201", "/nodes/{node_id}", map[string]string{"node_id": "n 1"}, "", "n 1"},
-		// Only as_member routes are served under /as/.
-		{"GET", "/as/" + memberID + "/nodes/" + nodeID, "", nil, "", ""},
-		{"GET", "/as/" + memberID + "/nodes", "", nil, "", ""},
-		{"GET", "/as/" + memberID, "", nil, "", ""},
-		{"DELETE", "/nodes/" + nodeID, "", nil, "", ""},
-		{"GET", "/nodes/" + nodeID + "/children/project/x", "", nil, "", ""},
-		{"GET", "/users", "", nil, "", ""},
-		{"GET", "/", "", nil, "", ""},
+			map[string]string{"node_id": nodeID, "kind": "project"}, true, nodeID},
+		{"POST", "/nodes/" + nodeID + "/children/project", "/nodes/{node_id}/children/{kind}",
+			map[string]string{"node_id": nodeID, "kind": "project"}, true, nodeID},
+		{"POST", "/nodes/search", "/nodes/search", nil, false, ""},
+		{"GET", "/nodes/search", "/nodes/{node_id}", map[string]string{"node_id": "search"}, false, "search"},
+		{"GET", "/nodes/n%201", "/nodes/{node_id}", map[string]string{"node_id": "n 1"}, false, "n 1"},
+		{"GET", "/as/" + memberID + "/nodes/" + nodeID, "", nil, false, ""},
+		{"DELETE", "/nodes/" + nodeID, "", nil, false, ""},
+		{"GET", "/nodes/" + nodeID + "/children/project/x", "", nil, false, ""},
+		{"GET", "/users", "", nil, false, ""},
+		{"GET", "/", "", nil, false, ""},
 	}
 	for _, c := range cases {
 		m := match(t, tab, c.method, c.path)
@@ -278,8 +289,8 @@ func TestMatch(t *testing.T) {
 		if m == nil {
 			continue
 		}
-		if m.Member != c.member || m.NodeID() != c.node {
-			t.Errorf("%s %s: member %q node %q, want %q %q", c.method, c.path, m.Member, m.NodeID(), c.member, c.node)
+		if m.AsMember != c.asMember || m.NodeID() != c.node {
+			t.Errorf("%s %s: asMember %v node %q, want %v %q", c.method, c.path, m.AsMember, m.NodeID(), c.asMember, c.node)
 		}
 		if len(m.Params) != len(c.params) {
 			t.Errorf("%s %s: params %v, want %v", c.method, c.path, m.Params, c.params)

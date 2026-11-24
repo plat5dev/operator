@@ -26,12 +26,12 @@ type Route struct {
 	Methods Methods `yaml:"methods"`
 	// Node is the param holding the Plat5 node id the route addresses, or "".
 	Node string `yaml:"node"`
-	// AsMember also serves the route's verbs at /as/{member} + Path. A verb's own
-	// as_member overrides it.
+	// AsMember allows callers to send X-Plat5-As-Member on this route's verbs. A
+	// verb's own as_member overrides it.
 	AsMember bool `yaml:"as_member"`
 
 	segments []segment
-	// verbs are the route's methods, each with whether it is served at /as/{member}.
+	// verbs are the route's methods, each with whether it allows X-Plat5-As-Member.
 	verbs   map[string]bool
 	service string
 	target  *url.URL
@@ -124,12 +124,6 @@ func (t *Table) HasNodes() bool {
 	return false
 }
 
-// asPrefix is the reserved first segment of /as/{member}/…, and member its param.
-const (
-	asPrefix    = "as"
-	memberParam = "member"
-)
-
 var (
 	nameRe  = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 	paramRe = regexp.MustCompile(`^\{([a-z][a-z0-9_]*)\}$`)
@@ -221,17 +215,11 @@ func (r *Route) compile() error {
 		return errors.New("path must start with / and have a segment")
 	}
 	seen := map[string]bool{}
-	for i, s := range strings.Split(r.Path[1:], "/") {
-		if i == 0 && s == asPrefix {
-			return errors.New("/as/ is reserved for acting as a member")
-		}
+	for _, s := range strings.Split(r.Path[1:], "/") {
 		if dottedRe.MatchString(s) {
 			return fmt.Errorf("parameter %s has a dot: params are bare, and this gateway fills nothing in", s)
 		}
 		if m := paramRe.FindStringSubmatch(s); m != nil {
-			if m[1] == memberParam {
-				return errors.New("parameter member is reserved for /as/{member}")
-			}
 			if seen[m[1]] {
 				return fmt.Errorf("parameter %s repeated", m[1])
 			}
@@ -298,17 +286,14 @@ func overlaps(a, b *Route) bool {
 // Match is a matched request.
 type Match struct {
 	Route *Route
-	// Params are the path params by name, member included when acting as one.
+	// Params are the path params by name.
 	Params map[string]string
-	// Member is the member from /as/{member}, or "".
-	Member string
+	// AsMember is whether the matched verb allows X-Plat5-As-Member.
+	AsMember bool
 }
 
-// Template is the matched path template, /as/{member} included when acting as one.
+// Template is the matched path template.
 func (m *Match) Template() string {
-	if m.Member != "" {
-		return "/" + asPrefix + "/{" + memberParam + "}" + m.Route.Path
-	}
 	return m.Route.Path
 }
 
@@ -320,16 +305,11 @@ func (m *Match) NodeID() string {
 	return m.Params[m.Route.Node]
 }
 
-// Match returns the route for this method and decoded path segments, or nil. A path
-// starting /as/{member}/ matches only a route whose verb has as_member, against the rest.
+// Match returns the route for this method and decoded path segments, or nil.
 func (t *Table) Match(method string, segs []string) *Match {
-	member := ""
-	if len(segs) > 2 && segs[0] == asPrefix {
-		member, segs = segs[1], segs[2:]
-	}
 	for _, r := range t.routes {
 		as, listed := r.verbs[method]
-		if len(r.segments) != len(segs) || !listed || (member != "" && !as) {
+		if len(r.segments) != len(segs) || !listed {
 			continue
 		}
 		params := map[string]string{}
@@ -345,10 +325,7 @@ func (t *Table) Match(method string, segs []string) *Match {
 			}
 		}
 		if ok {
-			if member != "" {
-				params[memberParam] = member
-			}
-			return &Match{Route: r, Params: params, Member: member}
+			return &Match{Route: r, Params: params, AsMember: as}
 		}
 	}
 	return nil

@@ -13,9 +13,9 @@ Every request, in order:
 1. **Preflight.** An `OPTIONS` preflight from an allowed origin is answered here. Never forwarded, never audited.
 2. **Authenticate.** A missing or invalid token → **401**. Not audited.
 3. **Match.** Check the path and match a route. Nothing is answered yet.
-4. **Resolve.** On a route with a node: the node's chain from identity, and when acting as a member, the member in the chain's root. Nothing is answered yet.
+4. **Resolve.** On a route with a node: the node's chain from identity, and when acting as a member on a route that allows it, the member in the chain's root. Nothing is answered yet.
 5. **Audit intent**, when audit is on → **503** if it can't be written ([`concepts/audit.md`](audit.md#delivery)).
-6. **Answer what can't be forwarded.** A path this gateway could read differently from the service → **400**. No route for the method and path → **404**. The route node not found → **404**. The member not active in the node's tree → **400**. Identity unreachable → **503**.
+6. **Answer what can't be forwarded.** A path this gateway could read differently from the service → **400**. No route for the method and path → **404**. An invalid, repeated, or disallowed `X-Plat5-As-Member` header (on a route or verb without `as_member: true`) → **400**. The route node not found → **404**. The member not active in the node's tree → **400**. Identity unreachable → **503**.
 7. **Forward**, with the headers below.
 8. **Outcome**, in the background, when audit is on.
 
@@ -36,10 +36,11 @@ A route without `node` is forwarded with no chain, as a Plat5 user route is: `GE
 
 ## Acting as a member
 
-A service that records authors needs `X-Plat5-Member-Id` (Plat5 `docs/guides/write-a-service.md`). An operator supplies one by acting as a member, and only that way: the path says so.
+A service that records authors needs `X-Plat5-Member-Id` (Plat5 `docs/guides/write-a-service.md`). An operator supplies one by sending `X-Plat5-As-Member: <member_id>`, and only that way.
 
 ```
-POST /as/01jbyb0d…/nodes/01jbx9q3…/children/project
+POST /nodes/01jbx9q3…/children/project
+X-Plat5-As-Member: 01jbyb0d…
 → POST /nodes/01jbx9q3…/children/project
   X-Plat5-Organization-Id: 01jbx9q3…
   X-Plat5-Member-Id: 01jbyb0d…
@@ -47,17 +48,17 @@ POST /as/01jbyb0d…/nodes/01jbx9q3…/children/project
   X-Plat5-Operator-Id: 00u1abc
 ```
 
-- **Only on routes that allow it.** A verb with `as_member: true`, its own or its route's, is also served at `/as/{member}` followed by the route's path. This gateway strips the prefix and forwards the rest exactly. Without `/as/`, the same route is forwarded with no member.
+- **Only on routes that allow it.** A verb with `as_member: true`, its own or its route's, accepts `X-Plat5-As-Member`. Sending `X-Plat5-As-Member` on any other matched route or verb, or sending an empty, malformed, or repeated value, is **400** `INVALID_REQUEST`. Without the header, the route is forwarded with no member.
 - **The member must be active in the node's tree.** Identity's member lookup in the chain's root must answer `status: active`. Anything else is **400**: a removed member, a member of another tree, an id that isn't a member. Suspension is per person in Plat5 and isn't checked here, as identity doesn't check it on a member id it is sent.
-- **The service is told the member and its principal.** `X-Plat5-Member-Id`, and `X-Plat5-Principal` as identity names the member's principal: `person` or `service_account`.
+- **The service is told the member and its principal.** `X-Plat5-As-Member` is stripped; the service gets `X-Plat5-Member-Id`, and `X-Plat5-Principal` as identity names the member's principal: `person` or `service_account`.
 - **Access is the operator's, never the member's.** The member's bindings are never read or applied. A filtered list asked as a member shows what that member can read.
 - **Both are recorded.** The operator audit log has the operator as the actor and the member as `acting_as` ([`concepts/audit.md`](audit.md)).
 
-Without `/as/`, a request carries no member id and no principal. A service that needs one refuses it as malformed; that's correct, and the operator retries as a member if the change should be authored. Identity's filtered lists are the full list without one, as `GET /nodes` is.
+Without `X-Plat5-As-Member`, a request carries no member id and no principal. A service that needs one refuses it as malformed; that's correct, and the operator retries as a member if the change should be authored. Identity's filtered lists are the full list without one, as `GET /nodes` is.
 
 ## Forwarding
 
-The path is forwarded exactly as received, after the `/as/{member}` prefix is stripped on a route that allows it. The query string and the body are forwarded unchanged; the body isn't read.
+The path, query string and body are forwarded unchanged; the body isn't read.
 
 Because the matched path is the path the service sees, this gateway refuses paths it could read differently from the service: dot segments (`.`, `..`), empty segments (`//`), and an encoded `/` or `\` in a segment. Those are **400**.
 

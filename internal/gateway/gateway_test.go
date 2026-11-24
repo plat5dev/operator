@@ -251,13 +251,16 @@ func TestRejections(t *testing.T) {
 		{"root", "GET", "/", good, 404, "NOT_FOUND", ""},
 		{"method not listed", "DELETE", "/nodes", good, 404, "NOT_FOUND", ""},
 		{"options without preflight", "OPTIONS", "/nodes", good, 404, "NOT_FOUND", ""},
-		{"as on a route without as_member", "GET", "/as/" + danaID + "/nodes/" + orgID, good, 404, "NOT_FOUND", ""},
-		{"as on no route", "GET", "/as/" + danaID + "/nodes", good, 404, "NOT_FOUND", ""},
+		{"as header on a route without as_member", "GET", "/nodes/" + orgID, map[string]string{"Authorization": "Bearer good", asMemberHeader: danaID}, 400, "INVALID_REQUEST", ""},
+		{"as header on a route without node", "GET", "/nodes", map[string]string{"Authorization": "Bearer good", asMemberHeader: danaID}, 400, "INVALID_REQUEST", ""},
+		{"as header empty", "POST", "/nodes/" + orgID + "/children/project", map[string]string{"Authorization": "Bearer good", asMemberHeader: "  "}, 400, "INVALID_REQUEST", ""},
+		{"as header malformed slash", "POST", "/nodes/" + orgID + "/children/project", map[string]string{"Authorization": "Bearer good", asMemberHeader: "a/b"}, 400, "INVALID_REQUEST", ""},
+		{"as header on unmatched route is 404", "GET", "/nope", map[string]string{"Authorization": "Bearer good", asMemberHeader: danaID}, 404, "NOT_FOUND", ""},
 		{"node not found", "GET", "/nodes/" + missingNodeID, good, 404, "NOT_FOUND", ""},
-		{"member removed", "POST", "/as/" + goneMemberID + "/nodes/" + orgID + "/children/project", good, 400, "INVALID_REQUEST", ""},
-		{"member of no tree", "POST", "/as/" + nobodyID + "/nodes/" + projectID + "/children/env", good, 400, "INVALID_REQUEST", ""},
+		{"member removed", "POST", "/nodes/" + orgID + "/children/project", map[string]string{"Authorization": "Bearer good", asMemberHeader: goneMemberID}, 400, "INVALID_REQUEST", ""},
+		{"member of no tree", "POST", "/nodes/" + projectID + "/children/env", map[string]string{"Authorization": "Bearer good", asMemberHeader: nobodyID}, 400, "INVALID_REQUEST", ""},
 		{"identity down for the node", "GET", "/nodes/" + downNodeID, good, 503, "SERVICE_UNAVAILABLE", ""},
-		{"identity down for the member", "GET", "/as/" + downMemberID + "/nodes/" + orgID + "/children/project", good, 503, "SERVICE_UNAVAILABLE", ""},
+		{"identity down for the member", "GET", "/nodes/" + orgID + "/children/project", map[string]string{"Authorization": "Bearer good", asMemberHeader: downMemberID}, 503, "SERVICE_UNAVAILABLE", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -413,40 +416,54 @@ func checkPlat5(t *testing.T, h http.Header, want map[string]string) {
 
 func TestActingAsMember(t *testing.T) {
 	cases := []struct {
-		name, path, upstreamPath string
-		want                     map[string]string
-		member                   string
+		name, path, member string
+		want               map[string]string
 	}{
-		{"person", "/as/" + danaID + "/nodes/" + orgID + "/children/project", "/nodes/" + orgID + "/children/project",
-			map[string]string{"X-Plat5-Organization-Id": orgID, "X-Plat5-Member-Id": danaID, "X-Plat5-Principal": "person"}, danaID},
-		{"service account, escaped", "/as/%30" + ciID[1:] + "/nodes/%30" + costCenterID[1:] + "/children/x%20y", "/nodes/%30" + costCenterID[1:] + "/children/x%20y",
+		{"person", "/nodes/" + orgID + "/children/project", danaID,
+			map[string]string{"X-Plat5-Organization-Id": orgID, "X-Plat5-Member-Id": danaID, "X-Plat5-Principal": "person"}},
+		{"service account, escaped path", "/nodes/%30" + costCenterID[1:] + "/children/x%20y", ciID,
 			map[string]string{"X-Plat5-Organization-Id": orgID, "X-Plat5-Project-Id": projectID, "X-Plat5-Cost-Center-Id": costCenterID,
-				"X-Plat5-Member-Id": ciID, "X-Plat5-Principal": "service_account"}, ciID},
+				"X-Plat5-Member-Id": ciID, "X-Plat5-Principal": "service_account"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			up := newUpstream(t, nil)
 			h, logs := setup(t, up.srv.URL, fakeAuth{}, 0)
-			w := do(h, "POST", c.path+"?q=1", map[string]string{"Authorization": "Bearer good", "X-Plat5-Member-Id": forgedMemberID})
+			w := do(h, "POST", c.path+"?q=1", map[string]string{
+				"Authorization":     "Bearer good",
+				asMemberHeader:      c.member,
+				"X-Plat5-Member-Id": forgedMemberID,
+			})
 			if w.Code != http.StatusTeapot {
 				t.Fatalf("status %d: %s", w.Code, w.Body)
 			}
 			s := up.seen()
-			if s.Path != c.upstreamPath || s.Query != "q=1" {
+			if s.Path != c.path || s.Query != "q=1" {
 				t.Fatalf("upstream %s?%s", s.Path, s.Query)
 			}
 			c.want["X-Plat5-Operator-Id"] = "op_1"
 			checkPlat5(t, s.Header, c.want)
 			line := lastLog(t, logs)
-			if line["member_id"] != c.member || line["route"] != "/as/{member}/nodes/{node_id}/children/{kind}" {
+			if line["member_id"] != c.member || line["route"] != "/nodes/{node_id}/children/{kind}" {
 				t.Fatalf("log = %v", line)
 			}
 		})
 	}
 
-	// Without /as/, the same route sends no member and no principal.
+	// Repeated X-Plat5-As-Member header is rejected with 400.
 	up := newUpstream(t, nil)
 	h, _ := setup(t, up.srv.URL, fakeAuth{}, 0)
+	r := httptest.NewRequest("POST", "/nodes/"+orgID+"/children/project", nil)
+	r.Header.Set("Authorization", "Bearer good")
+	r.Header.Add(asMemberHeader, danaID)
+	r.Header.Add(asMemberHeader, ciID)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 400 || decode(t, w).Error.Code != "INVALID_REQUEST" || up.seen() != nil {
+		t.Fatalf("repeated header: status %d, body %s, seen %v", w.Code, w.Body, up.seen())
+	}
+
+	// Without X-Plat5-As-Member, the same route sends no member and no principal.
 	do(h, "GET", "/nodes/"+orgID+"/children/project", map[string]string{"Authorization": "Bearer good"})
 	checkPlat5(t, up.seen().Header, map[string]string{"X-Plat5-Organization-Id": orgID, "X-Plat5-Operator-Id": "op_1"})
 }
@@ -461,16 +478,29 @@ func TestNoNodeNoChain(t *testing.T) {
 	}
 }
 
-func TestStripAs(t *testing.T) {
-	for in, want := range map[string]string{
-		"/as/" + someMemberID + "/nodes/" + someNodeID: "/nodes/" + someNodeID,
-		"/as/m%2F1/nodes":                "/nodes",
-		"/as/" + someMemberID + "/a/b/c": "/a/b/c",
-		"/nodes":                         "/nodes",
-		"/as/" + someMemberID:            "/as/" + someMemberID,
+func TestParseAsMember(t *testing.T) {
+	if got, err := parseAsMember(http.Header{}); err != nil || got != "" {
+		t.Fatalf("absent = %q, %v", got, err)
+	}
+	if got, err := parseAsMember(http.Header{asMemberHeader: {" " + someMemberID + " "}}); err != nil || got != someMemberID {
+		t.Fatalf("valid = %q, %v", got, err)
+	}
+	for _, bad := range [][]string{
+		{""},
+		{"   "},
+		{"."},
+		{".."},
+		{"a/b"},
+		{`a\b`},
+		{"a?b"},
+		{"a#b"},
+		{"a b"},
+		{"a\nb"},
+		{strings.Repeat("a", maxMemberIDLen+1)},
+		{someMemberID, danaID},
 	} {
-		if got := stripAs(in); got != want {
-			t.Errorf("stripAs(%q) = %q, want %q", in, got, want)
+		if got, err := parseAsMember(http.Header{asMemberHeader: bad}); err == nil {
+			t.Errorf("parseAsMember(%q) = %q, want error", bad, got)
 		}
 	}
 }
@@ -543,7 +573,8 @@ func TestCORS(t *testing.T) {
 		"Access-Control-Request-Method": "GET",
 	})
 	if w.Code != 204 || w.Header().Get("Access-Control-Allow-Origin") != "https://console.test" ||
-		!strings.Contains(w.Header().Get("Access-Control-Allow-Headers"), "Authorization") {
+		!strings.Contains(w.Header().Get("Access-Control-Allow-Headers"), "Authorization") ||
+		!strings.Contains(w.Header().Get("Access-Control-Allow-Headers"), asMemberHeader) {
 		t.Fatalf("preflight: %d %v", w.Code, w.Header())
 	}
 	if w.Header().Get("Access-Control-Allow-Credentials") != "" {

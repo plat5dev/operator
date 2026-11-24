@@ -11,7 +11,7 @@ An event is one request, not one change. A service may add what changed ([detail
 | Piece | Says | Owner |
 |-------|------|-------|
 | Actor | The operator, from the token | This gateway (authentication) |
-| Acting as | The member the operator acted as, and its principal | This gateway (`/as/{member}`, checked against identity) |
+| Acting as | The member the operator acted as, and its principal | This gateway (`X-Plat5-As-Member`, checked against identity) |
 | Nodes | The route node's chain, root first | This gateway (identity) |
 | Action | Service, method, route template, path params | This gateway (route match) |
 | Origin | IP, user agent | This gateway |
@@ -46,7 +46,7 @@ With audit on, every request that authenticates is recorded, whatever its method
 | **503**, intent not written | None, or `rejected` if the intent landed unseen ([delivery](#delivery)) |
 | **400** unacceptable path, **404** no route | `rejected`. `route` is `null`, `path` is set |
 | **404** route node not found | `rejected`. `route` is set, `nodes` is `[]` |
-| **400** member not active in the node's tree | `rejected`. `nodes` is set, `acting_as` is `null` |
+| **400** invalid or disallowed `X-Plat5-As-Member`, or member not active in the node's tree | `rejected`. `nodes` is set (when found), `acting_as` is `null` |
 | **503** identity unreachable | `rejected`. `nodes` is `[]` |
 | Forwarded | `responded` or `no_response` |
 
