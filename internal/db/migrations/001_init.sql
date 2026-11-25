@@ -31,7 +31,7 @@ CREATE TABLE audit_events (
     PRIMARY KEY (id, occurred_at),
     -- The partition key must be in a unique constraint. A retried intent sends
     -- the same body, so this is the request_id dedupe; the insert also checks
-    -- request_id alone.
+    -- request_id within a ±1 day occurred_at window to prune monthly partitions.
     UNIQUE (request_id, occurred_at),
     -- A matched route, or the raw path of an unmatched request. Never both.
     CHECK ((route IS NULL) <> (path IS NULL)),
