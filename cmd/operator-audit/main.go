@@ -7,16 +7,12 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
-	"regexp"
 	"sync"
 	"syscall"
 	"time"
@@ -26,6 +22,7 @@ import (
 	"github.com/plat5dev/operator/internal/apierr"
 	"github.com/plat5dev/operator/internal/db"
 	"github.com/plat5dev/operator/internal/events"
+	"github.com/plat5dev/operator/internal/httpx"
 	"github.com/plat5dev/operator/internal/metrics"
 )
 
@@ -106,16 +103,16 @@ func serve(ctx context.Context, stop context.CancelFunc, cfg config, pool *pgxpo
 
 	internal := http.NewServeMux()
 	internal.HandleFunc("GET /health/live", func(w http.ResponseWriter, _ *http.Request) {
-		status(w, http.StatusOK, "healthy")
+		httpx.WriteStatus(w, http.StatusOK, "healthy")
 	})
 	internal.HandleFunc("GET /health/ready", func(w http.ResponseWriter, r *http.Request) {
 		ping, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
 		if err := store.Ping(ping); err != nil {
-			status(w, http.StatusServiceUnavailable, "unhealthy")
+			httpx.WriteStatus(w, http.StatusServiceUnavailable, "unhealthy")
 			return
 		}
-		status(w, http.StatusOK, "healthy")
+		httpx.WriteStatus(w, http.StatusOK, "healthy")
 	})
 	internal.Handle("GET /metrics", reg)
 	handler.MountInternal(internal)
@@ -171,26 +168,22 @@ func countStale(ctx context.Context, store *events.Store, g *metrics.Gauge, log 
 	}
 }
 
-var requestIDRe = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
-
 // withRequest carries the gateway's request id into error envelopes and logs one line
 // per request, health and metrics aside.
 func withRequest(next http.Handler, log *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		id := r.Header.Get("X-Request-ID")
-		if !requestIDRe.MatchString(id) {
-			var b [16]byte
-			_, _ = rand.Read(b[:])
-			id = hex.EncodeToString(b[:])
+		if !httpx.ValidRequestID(id) {
+			id = httpx.NewRequestID()
 		}
 		r = r.WithContext(apierr.WithRequestID(r.Context(), id))
-		rec := &recorder{ResponseWriter: w}
+		rec := &httpx.Recorder{ResponseWriter: w}
 		defer func() {
 			rv := recover()
 			if rv != nil && rv != http.ErrAbortHandler {
 				log.Error("panic", "request_id", id, "panic", rv)
-				if rec.status == 0 {
+				if rec.Status == 0 {
 					apierr.Internal(rec, r)
 				}
 			}
@@ -199,7 +192,7 @@ func withRequest(next http.Handler, log *slog.Logger) http.Handler {
 				if route == "" || route == "/" {
 					route = r.Method + " " + r.URL.EscapedPath()
 				}
-				log.Info("request", "request_id", id, "route", route, "status", rec.status,
+				log.Info("request", "request_id", id, "route", route, "status", rec.Status,
 					"duration_ms", time.Since(start).Milliseconds())
 			}
 			if rv == http.ErrAbortHandler {
@@ -208,29 +201,4 @@ func withRequest(next http.Handler, log *slog.Logger) http.Handler {
 		}()
 		next.ServeHTTP(rec, r)
 	})
-}
-
-type recorder struct {
-	http.ResponseWriter
-	status int
-}
-
-func (r *recorder) WriteHeader(code int) {
-	if r.status == 0 {
-		r.status = code
-	}
-	r.ResponseWriter.WriteHeader(code)
-}
-
-func (r *recorder) Write(b []byte) (int, error) {
-	if r.status == 0 {
-		r.status = http.StatusOK
-	}
-	return r.ResponseWriter.Write(b)
-}
-
-func status(w http.ResponseWriter, code int, s string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": s})
 }

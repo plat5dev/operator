@@ -23,6 +23,9 @@ import (
 // Schema holds the operator audit log. Other operator-plane concerns get their own.
 const Schema = "audit"
 
+// migrateLockSpace namespaces the session advisory lock that serializes concurrent migrations.
+const migrateLockSpace int32 = 0x6f706d67 // "opmg"
+
 //go:embed migrations/*.sql
 var migrationFS embed.FS
 
@@ -116,13 +119,15 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, writerRole string) error {
 		return err
 	}
 	defer conn.Release()
-	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock(hashtext('audit.migrate'))`); err != nil {
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1, hashtext('audit.migrate'))`, migrateLockSpace); err != nil {
 		return err
 	}
 	defer func() {
 		unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_, _ = conn.Exec(unlockCtx, `SELECT pg_advisory_unlock(hashtext('audit.migrate'))`)
+		if _, err := conn.Exec(unlockCtx, `SELECT pg_advisory_unlock($1, hashtext('audit.migrate'))`, migrateLockSpace); err != nil {
+			_ = conn.Conn().Close(unlockCtx)
+		}
 	}()
 
 	// A deployment may create the schema for the owner, who then needs no CREATE on the
@@ -142,6 +147,9 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, writerRole string) error {
 		applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
 	)`); err != nil {
 		return fmt.Errorf("create schema_migrations: %w", err)
+	}
+	if err := refuseUnknown(ctx, conn, ms); err != nil {
+		return err
 	}
 	for _, m := range ms {
 		var done bool
@@ -183,6 +191,28 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, writerRole string) error {
 		}
 		return nil
 	})
+}
+
+// refuseUnknown stops migrate on a database that recorded migrations this build doesn't know.
+func refuseUnknown(ctx context.Context, conn *pgxpool.Conn, ms []migration) error {
+	known := make(map[string]bool, len(ms))
+	for _, m := range ms {
+		known[m.version] = true
+	}
+	rows, err := conn.Query(ctx, `SELECT version FROM schema_migrations ORDER BY version`)
+	if err != nil {
+		return fmt.Errorf("read schema_migrations: %w", err)
+	}
+	applied, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return fmt.Errorf("read schema_migrations: %w", err)
+	}
+	for _, v := range applied {
+		if !known[v] {
+			return fmt.Errorf("schema has migration %q that this build doesn't know; drop the schema or use a fresh database", v)
+		}
+	}
+	return nil
 }
 
 // ErrNotWriter means serve's role could change or delete history, or cannot write.

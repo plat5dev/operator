@@ -20,6 +20,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/plat5dev/operator/internal/httpx"
 	"github.com/plat5dev/operator/internal/metrics"
 )
 
@@ -32,7 +33,14 @@ const (
 	MaxCreatedLen      = 128
 	MaxDetailsBytes    = 4096
 	MaxActorBytes      = 1024
+	MaxIDLen           = 256
+	MaxNodes           = 32
+	MaxServiceLen      = 128
+	MaxRouteLen        = 2048
+	MaxParams          = 32
+	MaxParamNameLen    = 64
 	MaxParamValueBytes = 4096
+	MaxIPLen           = 256
 	MaxUserAgentChars  = 512
 	MaxPathChars       = 2048
 
@@ -111,7 +119,9 @@ const (
 )
 
 type Outcome struct {
-	Outcome OutcomeKind `json:"outcome"`
+	// OccurredAt echoes the intent's occurred_at so operator-audit can prune to one partition.
+	OccurredAt string      `json:"occurred_at,omitempty"`
+	Outcome    OutcomeKind `json:"outcome"`
 	// Status is what the gateway answered with. Nil when the client was gone first.
 	Status        *int            `json:"status"`
 	ResponseBytes int64           `json:"response_bytes"`
@@ -121,6 +131,8 @@ type Outcome struct {
 
 // State is what the gateway learns about a request between its intent and its outcome.
 type State struct {
+	// OccurredAt is the intent's occurred_at timestamp, echoed on the outcome for partition pruning.
+	OccurredAt string
 	// Forwarded means the gateway handed the request to the upstream.
 	Forwarded bool
 	// UpstreamStatus is set when the upstream answers.
@@ -146,7 +158,7 @@ func StateFrom(ctx context.Context) *State {
 
 // OutcomeFor is how the request ended. written is the status the gateway wrote, 0 for none.
 func OutcomeFor(s *State, written int, responseBytes int64) Outcome {
-	out := Outcome{ResponseBytes: responseBytes}
+	out := Outcome{OccurredAt: s.OccurredAt, ResponseBytes: responseBytes}
 	status := func(code int) *int {
 		if code == 0 {
 			return nil
@@ -201,13 +213,8 @@ func ParseCreated(values []string) (id *string, ok bool) {
 		return nil, false
 	}
 	v := values[0]
-	if v == "" || len(v) > MaxCreatedLen || v == "." || v == ".." {
+	if !httpx.ValidSegmentID(v, MaxCreatedLen) {
 		return nil, false
-	}
-	for i := 0; i < len(v); i++ {
-		if v[i] <= 0x20 || v[i] > 0x7e || v[i] == '/' || v[i] == '?' || v[i] == '#' {
-			return nil, false
-		}
 	}
 	return &v, true
 }
@@ -307,15 +314,7 @@ type queued struct {
 func New(cfg Config) *Writer {
 	client := cfg.Client
 	if client == nil {
-		client = &http.Client{
-			Transport: &http.Transport{
-				DialContext:         (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-				TLSHandshakeTimeout: 10 * time.Second,
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 64,
-				IdleConnTimeout:     90 * time.Second,
-			},
-		}
+		client = &http.Client{Transport: httpx.NewTransport(0)}
 	}
 	reg := cfg.Metrics
 	if reg == nil {

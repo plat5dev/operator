@@ -9,34 +9,23 @@ import (
 	"time"
 
 	"github.com/oklog/ulid/v2"
+
+	"github.com/plat5dev/operator/internal/audit"
 )
 
 // Outcomes (docs/reference/api/operator-audit.md#event). Pending is the only one an intent writes.
 const (
 	OutcomePending    = "pending"
-	OutcomeRejected   = "rejected"
-	OutcomeResponded  = "responded"
-	OutcomeNoResponse = "no_response"
+	OutcomeRejected   = string(audit.Rejected)
+	OutcomeResponded  = string(audit.Responded)
+	OutcomeNoResponse = string(audit.NoResponse)
 )
 
-type Actor struct {
-	Issuer     string  `json:"issuer"`
-	OperatorID string  `json:"operator_id"`
-	Email      *string `json:"email"`
-	ClientID   *string `json:"client_id"`
-}
-
-// ActingAs is the member an X-Plat5-As-Member request acted as.
-type ActingAs struct {
-	MemberID  string `json:"member_id"`
-	Principal string `json:"principal"`
-}
-
-// Node is one node of the route node's chain.
-type Node struct {
-	Kind string `json:"kind"`
-	ID   string `json:"id"`
-}
+type (
+	Actor    = audit.Actor
+	ActingAs = audit.ActingAs
+	Node     = audit.Node
+)
 
 // Intent is what the gateway knows before it answers or forwards.
 type Intent struct {
@@ -59,8 +48,9 @@ type Intent struct {
 
 // Outcome is how the request ended. Status is nil when the client was gone before an
 // answer, never on responded. Details and CreatedID are nil for null, and only set on
-// responded.
+// responded. OccurredAt is optional; when set, ApplyOutcome prunes to that partition.
 type Outcome struct {
+	OccurredAt    *time.Time
 	Outcome       string
 	Status        *int
 	ResponseBytes int64

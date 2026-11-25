@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -16,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/plat5dev/operator/internal/httpx"
 )
 
 var (
@@ -61,77 +62,97 @@ type Client struct {
 // New is a client of identity's public base URL. httpClient is for tests; nil is a plain one.
 func New(baseURL string, httpClient *http.Client) *Client {
 	if httpClient == nil {
-		httpClient = &http.Client{
-			Transport: &http.Transport{
-				DialContext:         (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-				TLSHandshakeTimeout: 10 * time.Second,
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 64,
-				IdleConnTimeout:     90 * time.Second,
-			},
-		}
+		httpClient = &http.Client{Transport: httpx.NewTransport(0)}
 	}
 	return &Client{base: strings.TrimRight(baseURL, "/"), http: httpClient, nodes: map[string]place{}}
 }
 
 // Chain is the node and its ancestors, root first. ErrNotFound means the node itself
-// isn't there; a missing ancestor is identity failing.
+// isn't there. Cached nodes are walked in memory; a cold node fetches its full chain
+// from GET /nodes/{id}'s ancestors in one call and caches every node in it.
 func (c *Client) Chain(ctx context.Context, nodeID, requestID string) ([]Node, error) {
+	if chain, ok := c.cachedChain(nodeID); ok {
+		return chain, nil
+	}
+
+	var node struct {
+		ID        string  `json:"id"`
+		Kind      string  `json:"kind"`
+		ParentID  *string `json:"parent_id"`
+		Ancestors []struct {
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+		} `json:"ancestors"`
+	}
+	status, err := c.get(ctx, "/nodes/"+url.PathEscape(nodeID), requestID, &node)
+	switch {
+	case err != nil:
+		return nil, err
+	case status == http.StatusNotFound:
+		return nil, ErrNotFound
+	case status != http.StatusOK:
+		return nil, fmt.Errorf("%w: GET /nodes/%s answered %d", ErrUnavailable, nodeID, status)
+	case node.ID != nodeID || !kindRe.MatchString(node.Kind):
+		return nil, fmt.Errorf("%w: GET /nodes/%s answered a node that can't be", ErrUnavailable, nodeID)
+	case node.ParentID == nil && len(node.Ancestors) != 0:
+		return nil, fmt.Errorf("%w: GET /nodes/%s root node has ancestors", ErrUnavailable, nodeID)
+	case node.ParentID != nil && (*node.ParentID == "" || len(node.Ancestors) == 0 || node.Ancestors[len(node.Ancestors)-1].ID != *node.ParentID):
+		return nil, fmt.Errorf("%w: GET /nodes/%s answered inconsistent ancestors", ErrUnavailable, nodeID)
+	case len(node.Ancestors)+1 > maxDepth:
+		return nil, fmt.Errorf("%w: chain of %s deeper than %d", ErrUnavailable, nodeID, maxDepth)
+	}
+
+	chain := make([]Node, 0, len(node.Ancestors)+1)
+	seen := make(map[string]struct{}, len(node.Ancestors)+1)
+	for _, a := range node.Ancestors {
+		if a.ID == "" || !kindRe.MatchString(a.Kind) {
+			return nil, fmt.Errorf("%w: GET /nodes/%s answered an ancestor that can't be", ErrUnavailable, nodeID)
+		}
+		if _, dup := seen[a.ID]; dup {
+			return nil, fmt.Errorf("%w: GET /nodes/%s answered duplicate ancestor %s", ErrUnavailable, nodeID, a.ID)
+		}
+		seen[a.ID] = struct{}{}
+		chain = append(chain, Node{Kind: a.Kind, ID: a.ID})
+	}
+	if _, dup := seen[node.ID]; dup {
+		return nil, fmt.Errorf("%w: GET /nodes/%s lists itself as an ancestor", ErrUnavailable, nodeID)
+	}
+	chain = append(chain, Node{Kind: node.Kind, ID: node.ID})
+
+	c.cacheChain(chain)
+	return chain, nil
+}
+
+func (c *Client) cachedChain(nodeID string) ([]Node, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	var chain []Node
 	for id := nodeID; id != ""; {
 		if len(chain) == maxDepth {
-			return nil, fmt.Errorf("%w: chain of %s deeper than %d", ErrUnavailable, nodeID, maxDepth)
+			return nil, false
 		}
-		p, err := c.place(ctx, id, requestID)
-		if errors.Is(err, ErrNotFound) && id != nodeID {
-			return nil, fmt.Errorf("%w: ancestor %s of %s not found", ErrUnavailable, id, nodeID)
-		}
-		if err != nil {
-			return nil, err
+		p, ok := c.nodes[id]
+		if !ok {
+			return nil, false
 		}
 		chain = append(chain, Node{Kind: p.kind, ID: id})
 		id = p.parent
 	}
 	slices.Reverse(chain)
-	return chain, nil
+	return chain, true
 }
 
-func (c *Client) place(ctx context.Context, id, requestID string) (place, error) {
-	c.mu.RLock()
-	p, ok := c.nodes[id]
-	c.mu.RUnlock()
-	if ok {
-		return p, nil
-	}
-
-	var node struct {
-		ID       string  `json:"id"`
-		Kind     string  `json:"kind"`
-		ParentID *string `json:"parent_id"`
-	}
-	status, err := c.get(ctx, "/nodes/"+url.PathEscape(id), requestID, &node)
-	switch {
-	case err != nil:
-		return place{}, err
-	case status == http.StatusNotFound:
-		return place{}, ErrNotFound
-	case status != http.StatusOK:
-		return place{}, fmt.Errorf("%w: GET /nodes/%s answered %d", ErrUnavailable, id, status)
-	case node.ID != id || !kindRe.MatchString(node.Kind) || (node.ParentID != nil && *node.ParentID == ""):
-		return place{}, fmt.Errorf("%w: GET /nodes/%s answered a node that can't be", ErrUnavailable, id)
-	}
-	p = place{kind: node.Kind}
-	if node.ParentID != nil {
-		p.parent = *node.ParentID
-	}
-
+func (c *Client) cacheChain(chain []Node) {
 	c.mu.Lock()
-	if len(c.nodes) >= cacheLimit {
+	defer c.mu.Unlock()
+	if len(c.nodes)+len(chain) > cacheLimit {
 		clear(c.nodes)
 	}
-	c.nodes[id] = p
-	c.mu.Unlock()
-	return p, nil
+	parent := ""
+	for _, n := range chain {
+		c.nodes[n.ID] = place{kind: n.Kind, parent: parent}
+		parent = n.ID
+	}
 }
 
 // Member is the principal of a member active in the tree rooted at rootID: person or

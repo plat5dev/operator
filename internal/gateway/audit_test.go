@@ -126,7 +126,7 @@ func TestAuditForwarded(t *testing.T) {
 		t.Fatalf("intent\n got %s\nwant %s", gotJSON, wantJSON)
 	}
 
-	if out.Outcome != audit.Responded || *out.Status != 201 || out.ResponseBytes != int64(len(`{"id":"01jbx9x9b1c3d5e7f9g1h3j5k7"}`)) ||
+	if out.Outcome != audit.Responded || out.OccurredAt != in.OccurredAt || *out.Status != 201 || out.ResponseBytes != int64(len(`{"id":"01jbx9x9b1c3d5e7f9g1h3j5k7"}`)) ||
 		string(out.Details) != `{"node_id":"01jbx9x9b1c3d5e7f9g1h3j5k7"}` || out.CreatedID == nil || *out.CreatedID != newNodeID {
 		t.Fatalf("outcome %+v details %s", out, out.Details)
 	}

@@ -124,7 +124,7 @@ Malformed includes: `occurred_at` more than 24 hours from operator-audit's clock
 ```
 PATCH /internal/events/{request_id}
 
-{ "outcome": "responded", "status": 201, "response_bytes": 312, "details": { … }, "created_id": "…" }
+{ "occurred_at": "…", "outcome": "responded", "status": 201, "response_bytes": 312, "details": { … }, "created_id": "…" }
 ```
 
 | Result | Response |
@@ -134,4 +134,4 @@ PATCH /internal/events/{request_id}
 | Malformed, or `outcome: pending` | **422** |
 | Postgres unavailable | **503**. The gateway retries |
 
-`status` may be `null` only when the client was gone before an answer, so never with `responded`. `details` and `created_id` may be set only with `responded`. `response_bytes` is a non-negative integer.
+`occurred_at` is optional; when sent (echoing the intent's timestamp), operator-audit prunes the update to that partition. `status` may be `null` only when the client was gone before an answer, so never with `responded`. `details` and `created_id` may be set only with `responded`. `response_bytes` is a non-negative integer.

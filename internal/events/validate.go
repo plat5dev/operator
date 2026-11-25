@@ -10,24 +10,27 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/plat5dev/operator/internal/audit"
+	"github.com/plat5dev/operator/internal/httpx"
 )
 
 // Limits on what the gateway sends (docs/reference/api/operator-audit.md#event). The gateway truncates or
 // cleans before it sends, so a value over a limit is a bug and gets 422.
 const (
-	maxActorLen      = 1024
-	maxIDLen         = 256
-	maxCreatedLen    = 128
-	maxNodes         = 32
-	maxServiceLen    = 128
-	maxRouteLen      = 2048
-	maxPathChars     = 2048
-	maxParams        = 32
-	maxParamNameLen  = 64
-	maxParamValueLen = 4096
-	maxIPLen         = 256
-	maxUserAgentLen  = 512 // characters
-	maxDetailsBytes  = 4096
+	maxActorLen      = audit.MaxActorBytes
+	maxIDLen         = audit.MaxIDLen
+	maxCreatedLen    = audit.MaxCreatedLen
+	maxNodes         = audit.MaxNodes
+	maxServiceLen    = audit.MaxServiceLen
+	maxRouteLen      = audit.MaxRouteLen
+	maxPathChars     = audit.MaxPathChars
+	maxParams        = audit.MaxParams
+	maxParamNameLen  = audit.MaxParamNameLen
+	maxParamValueLen = audit.MaxParamValueBytes
+	maxIPLen         = audit.MaxIPLen
+	maxUserAgentLen  = audit.MaxUserAgentChars
+	maxDetailsBytes  = audit.MaxDetailsBytes
 	// An intent is written as the request arrives. Far from now is a bug, and would
 	// ask for a partition nobody maintains.
 	maxClockSkew = 24 * time.Hour
@@ -40,7 +43,6 @@ var (
 	serviceRe   = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 	kindRe      = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 	paramNameRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
-	requestIDRe = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 	// An HTTP method is an RFC 9110 token.
 	methodRe = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,32}$")
 )
@@ -92,6 +94,7 @@ type nodeBody struct {
 }
 
 type outcomeBody struct {
+	OccurredAt    *string         `json:"occurred_at"`
 	Outcome       *string         `json:"outcome"`
 	Status        *int            `json:"status"`
 	ResponseBytes *int64          `json:"response_bytes"`
@@ -114,7 +117,7 @@ func decode(body []byte, dst any) error {
 
 // ParseIntent checks an intent body for requestID against now.
 func ParseIntent(requestID string, body []byte, now time.Time) (*Intent, error) {
-	if !requestIDRe.MatchString(requestID) {
+	if !httpx.ValidRequestID(requestID) {
 		return nil, Invalid{"request_id"}
 	}
 	var req intentBody
@@ -241,7 +244,7 @@ func ParseIntent(requestID string, body []byte, now time.Time) (*Intent, error) 
 
 // ParseOutcome checks an outcome body. Pending is not an outcome.
 func ParseOutcome(requestID string, body []byte) (*Outcome, error) {
-	if !requestIDRe.MatchString(requestID) {
+	if !httpx.ValidRequestID(requestID) {
 		return nil, Invalid{"request_id"}
 	}
 	var req outcomeBody
@@ -251,6 +254,14 @@ func ParseOutcome(requestID string, body []byte) (*Outcome, error) {
 
 	var bad Invalid
 	out := &Outcome{}
+	if req.OccurredAt != nil {
+		if t, ok := parseTime(req.OccurredAt); !ok {
+			bad.add("occurred_at")
+		} else {
+			at := t.UTC().Truncate(time.Millisecond)
+			out.OccurredAt = &at
+		}
+	}
 	switch {
 	case req.Outcome == nil:
 		bad.add("outcome")
@@ -307,15 +318,7 @@ func ParseOutcome(requestID string, body []byte) (*Outcome, error) {
 
 // validCreated is one id: visible ASCII, one path segment, within the cap.
 func validCreated(s string) bool {
-	if s == "" || len(s) > maxCreatedLen || s == "." || s == ".." {
-		return false
-	}
-	for i := 0; i < len(s); i++ {
-		if s[i] <= 0x20 || s[i] > 0x7e || s[i] == '/' || s[i] == '?' || s[i] == '#' {
-			return false
-		}
-	}
-	return true
+	return httpx.ValidSegmentID(s, maxCreatedLen)
 }
 
 var listOutcomes = map[string]bool{
@@ -398,7 +401,7 @@ func ParseFilter(rawQuery string) (Filter, error) {
 			}
 			f.Outcome = value
 		case "request_id":
-			if !requestIDRe.MatchString(value) {
+			if !httpx.ValidRequestID(value) {
 				bad.add(key)
 				continue
 			}

@@ -150,11 +150,16 @@ func TestParseOutcome(t *testing.T) {
 		t.Fatalf("%+v", out)
 	}
 	gone, err := ParseOutcome("r", []byte(`{"outcome":"no_response","status":null,"response_bytes":0}`))
-	if err != nil || gone.Status != nil {
+	if err != nil || gone.Status != nil || gone.OccurredAt != nil {
 		t.Fatalf("%+v %v", gone, err)
+	}
+	withAt, err := ParseOutcome("r", []byte(`{"occurred_at":"2026-10-09T18:30:00.123Z","outcome":"responded","status":200,"response_bytes":0}`))
+	if err != nil || withAt.OccurredAt == nil || withAt.OccurredAt.Format("2006-01-02T15:04:05.000Z") != "2026-10-09T18:30:00.123Z" {
+		t.Fatalf("occurred_at: %+v %v", withAt, err)
 	}
 
 	cases := map[string]string{
+		`{"occurred_at":"not-a-time","outcome":"responded","status":200,"response_bytes":0}`:               "occurred_at",
 		`{"outcome":"pending","status":200,"response_bytes":0}`:                                            "outcome",
 		`{"status":200,"response_bytes":0}`:                                                                "outcome",
 		`{"outcome":"responded","status":null,"response_bytes":0}`:                                         "status",

@@ -1,6 +1,6 @@
 # Operator IdP
 
-This gateway validates JWTs from one OIDC issuer: the operator IdP. Okta, Entra, Google Workspace, Keycloak, Plat5 Auth, or anything else that publishes a JWKS. Never the customer IdP.
+This gateway validates signed JWT access tokens (RFC 9068) from one issuer: the operator IdP. Okta, Entra, Google Workspace, Keycloak, Plat5 Auth, or anything else that publishes a JWKS. OIDC discovery, ID tokens, and userinfo endpoints aren't required. Never the customer IdP.
 
 How a caller gets a token is the IdP's business. People typically use authorization code with PKCE; automation typically uses client credentials. This gateway only checks the token.
 

@@ -16,7 +16,7 @@ Neither gateway calls the other. This gateway serves no UI, stores no accounts, 
 | Concept | What it is |
 |---|---|
 | **Operator** | A person or automation running the deployment, holding a token from the operator IdP. Its id is a claim of that token, unique within the issuer ([`reference/idp.md`](../reference/idp.md)) |
-| **Operator IdP** | The one OIDC issuer this gateway trusts. Never the customer IdP |
+| **Operator IdP** | The one JWT issuer this gateway trusts. Never the customer IdP |
 | **Route** | A service path this gateway forwards, from its own route list ([`reference/routes.md`](../reference/routes.md)) |
 | **Route node** | The path param holding the Plat5 node a route addresses (`node`) |
 | **Chain** | The route node and its ancestors, root first, as Plat5 identity has them. The service gets it as `X-Plat5-<Kind>-Id` headers, as from Plat5's gateway |

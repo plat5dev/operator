@@ -329,7 +329,7 @@ func TestParseCreated(t *testing.T) {
 		}
 	}
 	for _, bad := range [][]string{
-		{""}, {"a/b"}, {"a b"}, {"a?b"}, {"a#b"}, {"."}, {".."}, {"é"}, {"a\x00"},
+		{""}, {"a/b"}, {`a\b`}, {"a b"}, {"a?b"}, {"a#b"}, {"."}, {".."}, {"é"}, {"a\x00"},
 		{strings.Repeat("a", MaxCreatedLen+1)}, {"a", "b"},
 	} {
 		if _, good := ParseCreated(bad); good {

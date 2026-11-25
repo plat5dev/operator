@@ -21,6 +21,8 @@ services:
       UPSTREAM_TIMEOUT: ${UPSTREAM_TIMEOUT:-30s}
       AUDIT_ENABLED: ${AUDIT_ENABLED:-true}
       AUDIT_URL: ${AUDIT_URL:-http://operator-audit:8005}
+      UPSTREAM_SIGNING_KEY: ${UPSTREAM_SIGNING_KEY:-}
+      UPSTREAM_SIGNING_KEY_ID: ${UPSTREAM_SIGNING_KEY_ID:-}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8004/health/ready"]
       interval: 30s

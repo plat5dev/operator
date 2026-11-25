@@ -13,21 +13,22 @@ import (
 
 // Ids as Plat5 has them: lowercase ULIDs.
 const (
-	orgID           = "01jbx9q3t5vk8m2n4p6r7s8t9w"
-	projectID       = "01jbx9r2c4dk6m8n0p2q4r6s8t"
-	envID           = "01jbx9y2m4n6p8q0r2s4t6v8w0"
-	orphanID        = "01jbx9z5x7y9z1a3b5c7d9e1f3"
-	missingParentID = "01jbxa0g2h4j6k8m0n2p4q6r8s"
-	liarID          = "01jbxa1t3v5w7x9y1z3a5b7c9d"
-	otherID         = "01jbxa2e4f6g8h0j2k4m6n8p0q"
-	missingID       = "01jbx9v3f5g7h9j1k3m5n7p9q1"
-	loopAID         = "01jbxa3q5r7s9t1v3w5x7y9z1a"
-	loopBID         = "01jbxa4b3c5d7e9f1g3h5j7k9m"
-	danaID          = "01jbyb0d1e2f3g4h5j6k7m8n9p"
-	ciID            = "01jbyb1q2r3s4t5v6w7x8y9z0a"
-	goneID          = "01jbyb2a3b4c5d6e7f8g9h0j1k"
-	nobodyID        = "01jbyb4y5z6a7b8c9d0e1f2g3h"
-	strangeID       = "01jbyb6w7x8y9z0a1b2c3d4e5f"
+	orgID        = "01jbx9q3t5vk8m2n4p6r7s8t9w"
+	projectID    = "01jbx9r2c4dk6m8n0p2q4r6s8t"
+	envID        = "01jbx9y2m4n6p8q0r2s4t6v8w0"
+	badAncID     = "01jbx9z5x7y9z1a3b5c7d9e1f3"
+	mismatchID   = "01jbxa0g2h4j6k8m0n2p4q6r8s"
+	liarID       = "01jbxa1t3v5w7x9y1z3a5b7c9d"
+	otherID      = "01jbxa2e4f6g8h0j2k4m6n8p0q"
+	missingID    = "01jbx9v3f5g7h9j1k3m5n7p9q1"
+	selfLoopID   = "01jbxa3q5r7s9t1v3w5x7y9z1a"
+	rootWithAnc  = "01jbxa4b3c5d7e9f1g3h5j7k9m"
+	danaID       = "01jbyb0d1e2f3g4h5j6k7m8n9p"
+	ciID         = "01jbyb1q2r3s4t5v6w7x8y9z0a"
+	goneID       = "01jbyb2a3b4c5d6e7f8g9h0j1k"
+	suspendedID  = "01jbyb3m4n5p6q7r8s9t0v1w2x"
+	nobodyID     = "01jbyb4y5z6a7b8c9d0e1f2g3h"
+	strangeID    = "01jbyb6w7x8y9z0a1b2c3d4e5f"
 )
 
 // fake serves GET /nodes/{id} and GET /nodes/{root}/members/{member} from maps.
@@ -63,24 +64,38 @@ func (f *fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func node(id, kind string, parent any) map[string]any {
-	return map[string]any{"id": id, "kind": kind, "parent_id": parent, "root_id": orgID, "status": "active"}
+func anc(id, kind string) map[string]any {
+	return map[string]any{"id": id, "kind": kind, "slug": kind, "display_name": kind}
+}
+
+func node(id, kind string, parent any, ancestors ...map[string]any) map[string]any {
+	if ancestors == nil {
+		ancestors = []map[string]any{}
+	}
+	return map[string]any{
+		"id": id, "kind": kind, "parent_id": parent, "root_id": orgID,
+		"status": "active", "ancestors": ancestors,
+	}
 }
 
 func newFake() *fake {
 	return &fake{
 		nodes: map[string]map[string]any{
-			orgID:     node(orgID, "organization", nil),
-			projectID: node(projectID, "project", orgID),
-			envID:     node(envID, "environment", projectID),
-			orphanID:  node(orphanID, "project", missingParentID),
-			liarID:    node(otherID, "project", nil),
+			orgID:       node(orgID, "organization", nil),
+			projectID:   node(projectID, "project", orgID, anc(orgID, "organization")),
+			envID:       node(envID, "environment", projectID, anc(orgID, "organization"), anc(projectID, "project")),
+			badAncID:    node(badAncID, "project", orgID), // parent_id set but ancestors empty
+			mismatchID:  node(mismatchID, "project", projectID, anc(orgID, "organization")),
+			rootWithAnc: node(rootWithAnc, "organization", nil, anc(orgID, "organization")),
+			selfLoopID:  node(selfLoopID, "folder", selfLoopID, anc(selfLoopID, "folder")),
+			liarID:      node(otherID, "project", nil),
 		},
 		members: map[string]map[string]any{
-			orgID + "/" + danaID:    {"id": danaID, "principal": "person", "status": "active"},
-			orgID + "/" + ciID:      {"id": ciID, "principal": "service_account", "status": "active"},
-			orgID + "/" + goneID:    {"id": goneID, "principal": "person", "status": "removed"},
-			orgID + "/" + strangeID: {"id": strangeID, "principal": "operator", "status": "active"},
+			orgID + "/" + danaID:      {"id": danaID, "principal": "person", "status": "active"},
+			orgID + "/" + ciID:        {"id": ciID, "principal": "service_account", "status": "active"},
+			orgID + "/" + goneID:      {"id": goneID, "principal": "person", "status": "removed"},
+			orgID + "/" + suspendedID: {"id": suspendedID, "principal": "person", "status": "suspended"},
+			orgID + "/" + strangeID:   {"id": strangeID, "principal": "operator", "status": "active"},
 		},
 	}
 }
@@ -105,40 +120,40 @@ func TestChain(t *testing.T) {
 			t.Fatalf("chain = %v, want %v", chain, want)
 		}
 	}
+	// One HTTP call resolves the full chain via ancestors.
+	if f.calls.Load() != 1 {
+		t.Fatalf("cold 3-level chain made %d calls, want 1", f.calls.Load())
+	}
 
-	// Cached: nodes never move.
-	calls := f.calls.Load()
+	// Ancestors are cached too: nodes never move.
 	if _, err := c.Chain(ctx, projectID, "req-1"); err != nil {
 		t.Fatal(err)
 	}
-	if f.calls.Load() != calls {
-		t.Fatalf("chain of a cached node called identity %d times", f.calls.Load()-calls)
+	if _, err := c.Chain(ctx, orgID, "req-1"); err != nil {
+		t.Fatal(err)
+	}
+	if f.calls.Load() != 1 {
+		t.Fatalf("cached chain calls hit identity %d more times", f.calls.Load()-1)
 	}
 
 	if _, err := c.Chain(ctx, missingID, "req-1"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing node: %v", err)
 	}
-	if _, err := c.Chain(ctx, orphanID, "req-1"); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("missing ancestor: %v", err)
-	}
-	if _, err := c.Chain(ctx, liarID, "req-1"); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("answer for another node: %v", err)
+	for name, id := range map[string]string{
+		"empty ancestors with parent": badAncID,
+		"parent mismatch":             mismatchID,
+		"root with ancestors":         rootWithAnc,
+		"self loop":                   selfLoopID,
+		"answer for another node":     liarID,
+	} {
+		if _, err := c.Chain(ctx, id, "req-1"); !errors.Is(err, ErrUnavailable) {
+			t.Errorf("%s: got %v, want ErrUnavailable", name, err)
+		}
 	}
 	// Not-found isn't cached.
 	f.nodes[missingID] = node(missingID, "organization", nil)
 	if _, err := c.Chain(ctx, missingID, "req-1"); err != nil {
 		t.Fatalf("created after a miss: %v", err)
-	}
-}
-
-func TestChainLoop(t *testing.T) {
-	f := newFake()
-	f.nodes[loopAID] = node(loopAID, "folder", loopBID)
-	f.nodes[loopBID] = node(loopBID, "folder", loopAID)
-	srv := httptest.NewServer(f)
-	defer srv.Close()
-	if _, err := New(srv.URL, nil).Chain(context.Background(), loopAID, "req-1"); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("loop: %v", err)
 	}
 }
 
@@ -155,7 +170,7 @@ func TestMember(t *testing.T) {
 			t.Fatalf("%s: %q, %v", member, got, err)
 		}
 	}
-	for _, member := range []string{goneID, nobodyID} {
+	for _, member := range []string{goneID, suspendedID, nobodyID} {
 		if _, err := c.Member(ctx, orgID, member, "req-1"); !errors.Is(err, ErrNotActive) {
 			t.Fatalf("%s: %v", member, err)
 		}

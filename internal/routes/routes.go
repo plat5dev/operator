@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/plat5dev/operator/internal/audit"
 )
 
 // Service is one service address and the routes this gateway forwards to it.
@@ -30,7 +32,8 @@ type Route struct {
 	// verb's own as_member overrides it.
 	AsMember bool `yaml:"as_member"`
 
-	segments []segment
+	segments   []segment
+	paramCount int
 	// verbs are the route's methods, each with whether it allows X-Plat5-As-Member.
 	verbs   map[string]bool
 	service string
@@ -165,8 +168,8 @@ func Parse(data []byte) (*Table, error) {
 	var all []*Route
 	for _, name := range names {
 		svc := file.Services[name]
-		if !nameRe.MatchString(name) {
-			return nil, fmt.Errorf("services.%s: name must match %s", name, nameRe)
+		if !nameRe.MatchString(name) || len(name) > audit.MaxServiceLen {
+			return nil, fmt.Errorf("services.%s: name must match %s and be at most %d bytes", name, nameRe, audit.MaxServiceLen)
 		}
 		if svc == nil {
 			return nil, fmt.Errorf("services.%s: empty", name)
@@ -214,16 +217,26 @@ func (r *Route) compile() error {
 	if !strings.HasPrefix(r.Path, "/") || r.Path == "/" {
 		return errors.New("path must start with / and have a segment")
 	}
+	if len(r.Path) > audit.MaxRouteLen {
+		return fmt.Errorf("path exceeds %d bytes", audit.MaxRouteLen)
+	}
 	seen := map[string]bool{}
 	for _, s := range strings.Split(r.Path[1:], "/") {
 		if dottedRe.MatchString(s) {
 			return fmt.Errorf("parameter %s has a dot: params are bare, and this gateway fills nothing in", s)
 		}
 		if m := paramRe.FindStringSubmatch(s); m != nil {
+			if len(m[1]) > audit.MaxParamNameLen {
+				return fmt.Errorf("parameter %s exceeds %d bytes", m[1], audit.MaxParamNameLen)
+			}
 			if seen[m[1]] {
 				return fmt.Errorf("parameter %s repeated", m[1])
 			}
 			seen[m[1]] = true
+			r.paramCount++
+			if r.paramCount > audit.MaxParams {
+				return fmt.Errorf("more than %d path parameters", audit.MaxParams)
+			}
 			r.segments = append(r.segments, segment{param: m[1]})
 			continue
 		}
@@ -312,21 +325,23 @@ func (t *Table) Match(method string, segs []string) *Match {
 		if len(r.segments) != len(segs) || !listed {
 			continue
 		}
-		params := map[string]string{}
 		ok := true
 		for i, s := range r.segments {
-			if s.param != "" {
-				params[s.param] = segs[i]
-				continue
-			}
-			if s.literal != segs[i] {
+			if s.param == "" && s.literal != segs[i] {
 				ok = false
 				break
 			}
 		}
-		if ok {
-			return &Match{Route: r, Params: params, AsMember: as}
+		if !ok {
+			continue
 		}
+		params := make(map[string]string, r.paramCount)
+		for i, s := range r.segments {
+			if s.param != "" {
+				params[s.param] = segs[i]
+			}
+		}
+		return &Match{Route: r, Params: params, AsMember: as}
 	}
 	return nil
 }

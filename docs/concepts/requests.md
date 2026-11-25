@@ -49,7 +49,7 @@ X-Plat5-As-Member: 01jbyb0d…
 ```
 
 - **Only on routes that allow it.** A verb with `as_member: true`, its own or its route's, accepts `X-Plat5-As-Member`. Sending `X-Plat5-As-Member` on any other matched route or verb, or sending an empty, malformed, or repeated value, is **400** `INVALID_REQUEST`. Without the header, the route is forwarded with no member.
-- **The member must be active in the node's tree.** Identity's member lookup in the chain's root must answer `status: active`. Anything else is **400**: a removed member, a member of another tree, an id that isn't a member. Suspension is per person in Plat5 and isn't checked here, as identity doesn't check it on a member id it is sent.
+- **The member must be active in the node's tree.** Identity's member lookup in the chain's root must answer `status: active`. Anything else is **400**: a suspended or removed member, a member of another tree, an id that isn't a member. Account-level user suspension isn't checked here, as identity doesn't check it on a member id it is sent.
 - **The service is told the member and its principal.** `X-Plat5-As-Member` is stripped; the service gets `X-Plat5-Member-Id`, and `X-Plat5-Principal` as identity names the member's principal: `person` or `service_account`.
 - **Access is the operator's, never the member's.** The member's bindings are never read or applied. A filtered list asked as a member shows what that member can read.
 - **Both are recorded.** The operator audit log has the operator as the actor and the member as `acting_as` ([`concepts/audit.md`](audit.md)).

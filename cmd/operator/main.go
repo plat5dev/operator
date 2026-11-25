@@ -10,12 +10,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/plat5dev/operator/internal/audit"
 	"github.com/plat5dev/operator/internal/auth"
 	"github.com/plat5dev/operator/internal/gateway"
+	"github.com/plat5dev/operator/internal/httpx"
 	"github.com/plat5dev/operator/internal/identity"
 	"github.com/plat5dev/operator/internal/metrics"
 	"github.com/plat5dev/operator/internal/routes"
@@ -74,7 +76,10 @@ func run(log *slog.Logger) error {
 	}
 	gw := gateway.New(gwCfg)
 
+	var reloadMu sync.Mutex
 	reload := func() (int, error) {
+		reloadMu.Lock()
+		defer reloadMu.Unlock()
 		next, err := routes.Load(cfg.RoutesFile)
 		if err != nil {
 			return 0, err
@@ -165,14 +170,14 @@ func internalRoutes(v *auth.Verifier, reg *metrics.Registry, reload func() (int,
 	mux := http.NewServeMux()
 	mux.Handle("GET /metrics", reg)
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, _ *http.Request) {
-		status(w, http.StatusOK, "healthy")
+		httpx.WriteStatus(w, http.StatusOK, "healthy")
 	})
 	mux.HandleFunc("GET /health/ready", func(w http.ResponseWriter, _ *http.Request) {
 		if !v.Ready() {
-			status(w, http.StatusServiceUnavailable, "unhealthy")
+			httpx.WriteStatus(w, http.StatusServiceUnavailable, "unhealthy")
 			return
 		}
-		status(w, http.StatusOK, "healthy")
+		httpx.WriteStatus(w, http.StatusOK, "healthy")
 	})
 	mux.HandleFunc("POST /reload", func(w http.ResponseWriter, _ *http.Request) {
 		n, err := reload()
@@ -189,10 +194,4 @@ func internalRoutes(v *auth.Verifier, reg *metrics.Registry, reload func() (int,
 		_ = json.NewEncoder(w).Encode(map[string]any{"status": "reloaded", "routes": n})
 	})
 	return mux
-}
-
-func status(w http.ResponseWriter, code int, s string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": s})
 }

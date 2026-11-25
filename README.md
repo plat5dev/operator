@@ -33,6 +33,7 @@ Gateway API on `:5004` (`:5410` in dev compose), health and metrics on `:8004`. 
 | `internal/events/` | operator-audit's store, write API, and read route |
 | `internal/db/` | operator-audit's Postgres: migrations, owner and writer roles |
 | `internal/metrics/` | Prometheus text format for `/metrics` |
+| `internal/httpx/` | Shared HTTP transport, request ids, status/recorder helpers |
 | `internal/apierr/` | Plat5 error envelope |
 | `compose/` | Dev (with Plat5 Auth as the operator IdP, Postgres, an echo service, on Plat5's network) and prod compose |
 | `e2e/` | End-to-end tests against a running stack, opt-in |

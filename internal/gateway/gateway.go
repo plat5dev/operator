@@ -4,11 +4,8 @@ package gateway
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/http/httputil"
 	"strings"
@@ -18,6 +15,7 @@ import (
 	"github.com/plat5dev/operator/internal/apierr"
 	"github.com/plat5dev/operator/internal/audit"
 	"github.com/plat5dev/operator/internal/auth"
+	"github.com/plat5dev/operator/internal/httpx"
 	"github.com/plat5dev/operator/internal/identity"
 	"github.com/plat5dev/operator/internal/metrics"
 	"github.com/plat5dev/operator/internal/routes"
@@ -56,14 +54,9 @@ type Config struct {
 	Log     *slog.Logger
 }
 
-type routeSnapshot struct {
-	table   *routes.Table
-	proxies map[*routes.Route]*httputil.ReverseProxy
-}
-
 type Gateway struct {
-	snap            atomic.Pointer[routeSnapshot]
-	transport       *http.Transport
+	table           atomic.Pointer[routes.Table]
+	proxy           *httputil.ReverseProxy
 	auth            Authenticator
 	identity        Identity
 	audit           AuditWriter
@@ -104,25 +97,17 @@ func New(cfg Config) *Gateway {
 	if reg == nil {
 		reg = metrics.NewRegistry()
 	}
-	transport := &http.Transport{
-		DialContext:           (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ResponseHeaderTimeout: cfg.UpstreamTimeout,
-		MaxIdleConns:          100,
-		MaxIdleConnsPerHost:   64,
-		IdleConnTimeout:       90 * time.Second,
-	}
 	g := &Gateway{
-		transport: transport,
-		auth:      cfg.Auth,
-		identity:  cfg.Identity,
-		audit:     cfg.Audit,
-		signer:    cfg.Signer,
-		origins:   map[string]bool{},
+		auth:     cfg.Auth,
+		identity: cfg.Identity,
+		audit:    cfg.Audit,
+		signer:   cfg.Signer,
+		origins:  map[string]bool{},
 		unauthenticated: reg.Counter("operator_unauthenticated_total",
 			"Requests answered 401, by reason. They are not audit events.", "reason"),
 		log: cfg.Log,
 	}
+	g.proxy = g.newProxy(httpx.NewTransport(cfg.UpstreamTimeout))
 	for _, reason := range []string{"missing", "expired", "invalid"} {
 		g.unauthenticated.Add(0, reason)
 	}
@@ -135,23 +120,20 @@ func New(cfg Config) *Gateway {
 	return g
 }
 
-// Reload atomically replaces the active route table and reverse proxies.
+// Reload atomically replaces the active route table.
 // If table names nodes when no identity client was configured, Reload refuses
-// the update and leaves the previous snapshot active.
+// the update and leaves the previous table active.
 func (g *Gateway) Reload(table *routes.Table) error {
 	if table.HasNodes() && g.identity == nil {
 		return errors.New("routes name nodes but IDENTITY_URL is not configured")
 	}
-	proxies := make(map[*routes.Route]*httputil.ReverseProxy, table.Len())
-	for _, r := range table.Routes() {
-		proxies[r] = g.proxy(r, g.transport)
-	}
-	g.snap.Store(&routeSnapshot{table: table, proxies: proxies})
+	g.table.Store(table)
 	return nil
 }
 
 // forward is what the proxy sends beside the path. The proxy hooks see only the request.
 type forward struct {
+	route      *routes.Route
 	operatorID string
 	chain      []identity.Node
 	// member and principal are set when acting as a member.
@@ -160,21 +142,20 @@ type forward struct {
 
 type forwardKey struct{}
 
-func (g *Gateway) proxy(route *routes.Route, transport http.RoundTripper) *httputil.ReverseProxy {
-	target := route.Target()
+func (g *Gateway) newProxy(transport http.RoundTripper) *httputil.ReverseProxy {
 	return &httputil.ReverseProxy{
 		Transport: transport,
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			f := pr.In.Context().Value(forwardKey{}).(*forward)
 			// SetURL keeps the escaped request path and query exactly as received.
-			pr.SetURL(target)
+			pr.SetURL(f.route.Target())
 			h := pr.Out.Header
 			for _, k := range stripped {
 				h.Del(k)
 			}
 			// A client can't name a node, a member or an operator.
 			for k := range h {
-				if strings.HasPrefix(k, plat5Prefix) {
+				if hasPrefixFold(k, plat5Prefix) {
 					h.Del(k)
 				}
 			}
@@ -193,6 +174,7 @@ func (g *Gateway) proxy(route *routes.Route, transport http.RoundTripper) *httpu
 			}
 		},
 		ModifyResponse: func(res *http.Response) error {
+			f := res.Request.Context().Value(forwardKey{}).(*forward)
 			// This gateway owns the request id, CORS and the security headers.
 			res.Header.Del("X-Request-ID")
 			for k := range securityHeaders {
@@ -202,7 +184,7 @@ func (g *Gateway) proxy(route *routes.Route, transport http.RoundTripper) *httpu
 			created := res.Header.Values(audit.CreatedHeader)
 			// What the service tells the audit log never reaches the client, audit on or off.
 			for k := range res.Header {
-				if strings.HasPrefix(k, "Access-Control-") || strings.HasPrefix(k, audit.HeaderPrefix) {
+				if hasPrefixFold(k, "Access-Control-") || hasPrefixFold(k, audit.HeaderPrefix) {
 					res.Header.Del(k)
 				}
 			}
@@ -213,14 +195,14 @@ func (g *Gateway) proxy(route *routes.Route, transport http.RoundTripper) *httpu
 					var ok bool
 					if st.Details, ok = audit.ParseDetails(details); !ok {
 						g.log.Warn("ignoring audit details that are not one ASCII JSON object within 4096 bytes",
-							"request_id", id, "service", route.Service())
+							"request_id", id, "service", f.route.Service())
 					}
 				}
 				if len(created) > 0 {
 					var ok bool
 					if st.CreatedID, ok = audit.ParseCreated(created); !ok {
 						g.log.Warn("ignoring an audit created id that is not one path segment of ASCII within 128 bytes",
-							"request_id", id, "service", route.Service())
+							"request_id", id, "service", f.route.Service())
 					}
 				}
 			}
@@ -233,10 +215,15 @@ func (g *Gateway) proxy(route *routes.Route, transport http.RoundTripper) *httpu
 				}
 				return
 			}
-			g.log.Warn("upstream failed", "request_id", apierr.RequestID(r.Context()), "service", route.Service(), "err", err)
+			f := r.Context().Value(forwardKey{}).(*forward)
+			g.log.Warn("upstream failed", "request_id", apierr.RequestID(r.Context()), "service", f.route.Service(), "err", err)
 			apierr.BadGateway(w, r)
 		},
 	}
+}
+
+func hasPrefixFold(s, prefix string) bool {
+	return len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix)
 }
 
 // kindHeader is X-Plat5-<Kind>-Id, as Plat5 names it: project → X-Plat5-Project-Id,
@@ -287,13 +274,8 @@ func parseAsMember(h http.Header) (string, error) {
 		return "", errBadAsMember
 	}
 	v := strings.TrimSpace(vals[0])
-	if v == "" || len(v) > maxMemberIDLen || v == "." || v == ".." {
+	if !httpx.ValidSegmentID(v, maxMemberIDLen) {
 		return "", errBadAsMember
-	}
-	for i := 0; i < len(v); i++ {
-		if v[i] <= 0x20 || v[i] > 0x7e || v[i] == '/' || v[i] == '\\' || v[i] == '?' || v[i] == '#' {
-			return "", errBadAsMember
-		}
 	}
 	return v, nil
 }
@@ -301,9 +283,9 @@ func parseAsMember(h http.Header) (string, error) {
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	// Every request id is generated here. A client's is not accepted: it keys the audit event.
-	id := newRequestID()
+	id := httpx.NewRequestID()
 	r = r.WithContext(apierr.WithRequestID(r.Context(), id))
-	rec := &recorder{ResponseWriter: w}
+	rec := &httpx.Recorder{ResponseWriter: w}
 	w = rec
 
 	h := w.Header()
@@ -332,14 +314,14 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rv := recover()
 		if rv != nil && rv != http.ErrAbortHandler {
 			g.log.Error("panic", "request_id", id, "panic", rv)
-			if rec.status == 0 {
+			if rec.Status == 0 {
 				apierr.Internal(w, r)
 			}
 		}
 		if state != nil {
-			g.audit.SendOutcome(id, audit.OutcomeFor(state, rec.status, rec.bytes))
+			g.audit.SendOutcome(id, audit.OutcomeFor(state, rec.Status, rec.Bytes))
 		}
-		g.logRequest(r, id, op, match, asMember, res, rec.status, time.Since(start))
+		g.logRequest(r, id, op, match, asMember, res, rec.Status, time.Since(start))
 		if rv == http.ErrAbortHandler {
 			panic(rv)
 		}
@@ -378,12 +360,12 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 3. Check the path, match a route, and read X-Plat5-As-Member. Nothing is answered yet.
-	snap := g.snap.Load()
+	table := g.table.Load()
 	segs, pathErr := routes.Segments(r.URL.EscapedPath())
 	var asMemberErr error
 	asMember, asMemberErr = parseAsMember(r.Header)
 	if pathErr == nil {
-		match = snap.table.Match(r.Method, segs)
+		match = table.Match(r.Method, segs)
 		if match != nil && asMemberErr == nil && asMember != "" && !match.AsMember {
 			asMemberErr = errBadAsMember
 		}
@@ -398,9 +380,10 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 5. Nothing past authentication answers until the audit intent is written.
 	if g.audit != nil {
-		state = &audit.State{}
+		in := intent(r, id, start, op, match, asMember, res)
+		state = &audit.State{OccurredAt: in.OccurredAt}
 		r = r.WithContext(audit.WithState(r.Context(), state))
-		if err := g.audit.WriteIntent(r.Context(), intent(r, id, start, op, match, asMember, res)); err != nil {
+		if err := g.audit.WriteIntent(r.Context(), in); err != nil {
 			apierr.Unavailable(w, r)
 			return
 		}
@@ -430,7 +413,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 7. Forward.
-	f := &forward{operatorID: op.ID, chain: res.chain}
+	f := &forward{route: match.Route, operatorID: op.ID, chain: res.chain}
 	if asMember != "" {
 		f.member, f.principal = asMember, res.principal
 	}
@@ -438,7 +421,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if state != nil {
 		state.Forwarded = true
 	}
-	snap.proxies[match.Route].ServeHTTP(w, r)
+	g.proxy.ServeHTTP(w, r)
 }
 
 func (g *Gateway) unauthorized(w http.ResponseWriter, r *http.Request, reason string) {
@@ -521,36 +504,3 @@ func (g *Gateway) logRequest(r *http.Request, id string, op *auth.Operator, m *r
 	}
 	g.log.Info("request", attrs...)
 }
-
-func newRequestID() string {
-	var b [16]byte
-	_, _ = rand.Read(b[:])
-	return hex.EncodeToString(b[:])
-}
-
-// recorder keeps the status and body size for the request log and the audit outcome.
-// Unwrap lets the proxy flush.
-type recorder struct {
-	http.ResponseWriter
-	status int
-	bytes  int64
-}
-
-func (r *recorder) WriteHeader(code int) {
-	// A 1xx the proxy passes on is not the answer.
-	if r.status == 0 && code >= 200 {
-		r.status = code
-	}
-	r.ResponseWriter.WriteHeader(code)
-}
-
-func (r *recorder) Write(b []byte) (int, error) {
-	if r.status == 0 {
-		r.status = http.StatusOK
-	}
-	n, err := r.ResponseWriter.Write(b)
-	r.bytes += int64(n)
-	return n, err
-}
-
-func (r *recorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }

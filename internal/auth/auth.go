@@ -16,6 +16,8 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
+
+	"github.com/plat5dev/operator/internal/httpx"
 )
 
 var (
@@ -81,7 +83,7 @@ func New(cfg Config, log *slog.Logger) *Verifier {
 		cfg.EmailClaim = "email"
 	}
 	if cfg.Client == nil {
-		cfg.Client = &http.Client{Timeout: 10 * time.Second}
+		cfg.Client = &http.Client{Transport: httpx.NewTransport(0), Timeout: 10 * time.Second}
 	}
 	return &Verifier{cfg: cfg, log: log, now: time.Now}
 }

@@ -18,7 +18,7 @@ Every header this gateway sets, strips or reads. Plat5 defines `X-Plat5-*` heade
 | `X-Plat5-Principal` | Acting as a member | The member's principal as identity names it: `person` or `service_account` |
 | `X-Request-ID` | Every request | Generated here. A client's is replaced |
 | `traceparent` | When the client sent one | Passed through |
-| `X-Plat5-Signature` | When `UPSTREAM_SIGNING_KEY` is set | Ed25519 request signature in Plat5's `v1` format (`v1,kid=<kid>,t=<unix_seconds>,sig=<base64url_nopad>`), signing `v1`, `kid`, `t`, uppercase method, rewritten `path_and_query`, `X-Request-ID`, and every outgoing `X-Plat5-*` header (including `X-Plat5-Operator-Id`) sorted by lowercase name |
+| `X-Plat5-Signature` | When `UPSTREAM_SIGNING_KEY` is set | Ed25519 request signature in Plat5's `v1` format (`v1,kid=<kid>,t=<unix_seconds>,sig=<base64url_nopad>`), signing `v1`, `kid`, `t`, uppercase method, `path_and_query`, `X-Request-ID`, and every outgoing `X-Plat5-*` header (including `X-Plat5-Operator-Id`) sorted by lowercase name |
 
 Never sent: the operator's token, the operator's email or claims, an `X-Plat5-Principal` without a member, `X-Plat5-User-Id`, the member's bindings.
 

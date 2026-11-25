@@ -111,6 +111,9 @@ func TestParseErrors(t *testing.T) {
 		"literal vs param":        one("      - path: /a/new\n        methods: [GET]\n      - path: /a/{id}\n        methods: [GET, POST]\n"),
 		"duplicate route":         one("      - path: /a\n        methods: [GET]\n      - path: /a\n        methods: [GET]\n"),
 		"overlap across services": "services:\n  x:\n    url: http://x\n    routes:\n      - path: /a/{x}\n        methods: [GET]\n  y:\n    url: http://y\n    routes:\n      - path: /a/{y}\n        methods: [GET]\n",
+		"service name too long":   "services:\n  " + strings.Repeat("a", 129) + ":\n    url: http://x\n    routes:\n      - path: /a\n        methods: [GET]\n",
+		"param name too long":     one("      - path: /a/{" + strings.Repeat("p", 65) + "}\n        methods: [GET]\n"),
+		"path too long":           one("      - path: /" + strings.Repeat("a", 2048) + "\n        methods: [GET]\n"),
 	}
 	for name, in := range cases {
 		t.Run(name, func(t *testing.T) {

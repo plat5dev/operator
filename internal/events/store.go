@@ -55,8 +55,8 @@ func (s *Store) CreateIntent(ctx context.Context, in *Intent) (created bool, err
 	}
 	insert := func() (pgconn.CommandTag, error) {
 		// request_id alone is the dedupe. The unique index has occurred_at too (the
-		// partition key), so check request_id here and let the index catch two
-		// identical intents racing.
+		// partition key), so check request_id within a 1-day window (pruning to 1-2
+		// monthly partitions) and let the index catch two identical intents racing.
 		return s.pool.Exec(ctx, `
 			INSERT INTO audit_events (id, occurred_at, request_id, actor_issuer, actor_operator_id,
 				actor_email, actor_client_id, acting_as_member_id, acting_as_principal, root_id, nodes,
@@ -64,7 +64,12 @@ func (s *Store) CreateIntent(ctx context.Context, in *Intent) (created bool, err
 			SELECT $1::text, $2::timestamptz, $3::text, $4::text, $5::text, $6::text, $7::text,
 				$8::text, $9::text, $10::text, $11::jsonb, $12::text[], $13::text, $14::text, $15::text,
 				$16::jsonb, $17::text, $18::text, $19::text
-			WHERE NOT EXISTS (SELECT 1 FROM audit_events WHERE request_id = $3::text)
+			WHERE NOT EXISTS (
+				SELECT 1 FROM audit_events
+				WHERE request_id = $3::text
+				  AND occurred_at >= $2::timestamptz - interval '1 day'
+				  AND occurred_at <= $2::timestamptz + interval '1 day'
+			)
 			ON CONFLICT DO NOTHING
 		`, newID(in.OccurredAt), in.OccurredAt, in.RequestID, in.Actor.Issuer, in.Actor.OperatorID,
 			in.Actor.Email, in.Actor.ClientID, actingAs, principal, in.RootID, string(nodes), nodeIDs,
@@ -93,11 +98,17 @@ func (s *Store) ApplyOutcome(ctx context.Context, requestID string, out *Outcome
 	if out.Details != nil {
 		details = string(out.Details)
 	}
+	updateArgs := []any{requestID, out.Outcome, out.Status, out.ResponseBytes, details, out.CreatedID}
+	occurredCond := ""
+	if out.OccurredAt != nil {
+		occurredCond = " AND occurred_at = $7"
+		updateArgs = append(updateArgs, *out.OccurredAt)
+	}
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE audit_events
 		SET outcome = $2, status = $3, response_bytes = $4, details = $5::jsonb, created_id = $6
-		WHERE request_id = $1 AND outcome = 'pending'
-	`, requestID, out.Outcome, out.Status, out.ResponseBytes, details, out.CreatedID)
+		WHERE request_id = $1`+occurredCond+` AND outcome = 'pending'
+	`, updateArgs...)
 	if err != nil {
 		return false, fmt.Errorf("apply outcome: %w", err)
 	}
@@ -105,8 +116,14 @@ func (s *Store) ApplyOutcome(ctx context.Context, requestID string, out *Outcome
 		return true, nil
 	}
 	var exists bool
+	existsArgs := []any{requestID}
+	existsCond := ""
+	if out.OccurredAt != nil {
+		existsCond = " AND occurred_at = $2"
+		existsArgs = append(existsArgs, *out.OccurredAt)
+	}
 	if err := s.pool.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM audit_events WHERE request_id = $1)`, requestID,
+		`SELECT EXISTS (SELECT 1 FROM audit_events WHERE request_id = $1`+existsCond+`)`, existsArgs...,
 	).Scan(&exists); err != nil {
 		return false, fmt.Errorf("apply outcome: %w", err)
 	}
