@@ -34,7 +34,7 @@ services:
 # Authorization (OpenID AuthZEN 1.0 PDP). Default mode is `authzen`.
 authorizer:
   mode: authzen                       # authzen (default) | disabled
-  url: http://topaz:8383              # required when mode is authzen
+  url: http://topaz:9393              # required when mode is authzen
   timeout: 2s                         # default 2s
   token_env: OPERATOR_AUTHORIZER_TOKEN
 
