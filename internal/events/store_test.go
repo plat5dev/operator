@@ -212,3 +212,40 @@ func TestStorePartitionsAndStale(t *testing.T) {
 		t.Fatalf("stale %d err %v", n, err)
 	}
 }
+
+func TestStoreExportCommitOrder(t *testing.T) {
+	s := writerStore(t)
+	ctx := context.Background()
+	base := time.Now().Add(-time.Minute).UTC().Truncate(time.Millisecond)
+
+	if _, err := s.CreateIntent(ctx, matched("slow", "op_1", "org_1", base)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateIntent(ctx, matched("fast", "op_1", "org_1", base.Add(time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	list, cursor, more, err := s.Export(ctx, 0, 10)
+	if err != nil || len(list) != 0 || cursor != 0 || more {
+		t.Fatalf("pending only: %v len=%d cursor=%d more=%v", err, len(list), cursor, more)
+	}
+
+	status := 200
+	if _, err := s.ApplyOutcome(ctx, "fast", &Outcome{Outcome: OutcomeResponded, Status: &status}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApplyOutcome(ctx, "slow", &Outcome{Outcome: OutcomeResponded, Status: &status}); err != nil {
+		t.Fatal(err)
+	}
+
+	p1, c1, more1, err := s.Export(ctx, 0, 1)
+	if err != nil || !more1 || len(p1) != 1 || p1[0].RequestID != "fast" {
+		t.Fatalf("page 1: %v more=%v %+v", err, more1, p1)
+	}
+	p2, c2, more2, err := s.Export(ctx, c1, 10)
+	if err != nil || more2 || len(p2) != 1 || p2[0].RequestID != "slow" || c2 <= c1 {
+		t.Fatalf("page 2: %v more=%v %+v c1=%d c2=%d", err, more2, p2, c1, c2)
+	}
+	if _, _, _, err := s.Export(ctx, c2+5, 10); !errors.Is(err, ErrCursorAhead) {
+		t.Fatalf("want ErrCursorAhead, got %v", err)
+	}
+}

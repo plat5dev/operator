@@ -14,7 +14,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-var ErrNotFound = errors.New("not found")
+var (
+	ErrNotFound    = errors.New("not found")
+	ErrCursorAhead = errors.New("cursor ahead")
+)
 
 const (
 	queryTimeout     = 5 * time.Second
@@ -104,15 +107,27 @@ func (s *Store) ApplyOutcome(ctx context.Context, requestID string, out *Outcome
 		occurredCond = " AND occurred_at = $7"
 		updateArgs = append(updateArgs, *out.OccurredAt)
 	}
-	tag, err := s.pool.Exec(ctx, `
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("apply outcome: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('audit.export_seq'))`); err != nil {
+		return false, fmt.Errorf("apply outcome: %w", err)
+	}
+	tag, err := tx.Exec(ctx, `
 		UPDATE audit_events
-		SET outcome = $2, status = $3, response_bytes = $4, details = $5::jsonb, created_id = $6
+		SET outcome = $2, status = $3, response_bytes = $4, details = $5::jsonb, created_id = $6,
+			finalized_seq = nextval('export_seq')
 		WHERE request_id = $1`+occurredCond+` AND outcome = 'pending'
 	`, updateArgs...)
 	if err != nil {
 		return false, fmt.Errorf("apply outcome: %w", err)
 	}
 	if tag.RowsAffected() > 0 {
+		if err := tx.Commit(ctx); err != nil {
+			return false, fmt.Errorf("apply outcome: %w", err)
+		}
 		return true, nil
 	}
 	var exists bool
@@ -122,7 +137,7 @@ func (s *Store) ApplyOutcome(ctx context.Context, requestID string, out *Outcome
 		existsCond = " AND occurred_at = $2"
 		existsArgs = append(existsArgs, *out.OccurredAt)
 	}
-	if err := s.pool.QueryRow(ctx,
+	if err := tx.QueryRow(ctx,
 		`SELECT EXISTS (SELECT 1 FROM audit_events WHERE request_id = $1`+existsCond+`)`, existsArgs...,
 	).Scan(&exists); err != nil {
 		return false, fmt.Errorf("apply outcome: %w", err)
@@ -223,6 +238,80 @@ func (s *Store) List(ctx context.Context, f Filter) ([]*Event, bool, error) {
 		out = out[:f.Limit]
 	}
 	return out, hasMore, nil
+}
+
+// Export returns one page of finalized events past after, ascending by
+// finalized_seq, for deployment-wide SIEM / WORM export (GET /internal/events).
+// Returns ErrCursorAhead when after is past export_seq's head (DB reset).
+func (s *Store) Export(ctx context.Context, after int64, limit int) ([]*Event, int64, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+
+	var head int64
+	if err := s.pool.QueryRow(ctx, `SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM export_seq`).Scan(&head); err != nil {
+		return nil, 0, false, fmt.Errorf("export head: %w", err)
+	}
+	if after > head {
+		return nil, 0, false, ErrCursorAhead
+	}
+
+	rows, err := s.pool.Query(ctx, `SELECT finalized_seq, `+eventColumns+` FROM audit_events
+		WHERE finalized_seq > $1
+		ORDER BY finalized_seq ASC
+		LIMIT $2`, after, limit+1)
+	if err != nil {
+		return nil, 0, false, fmt.Errorf("export events: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*Event
+	for rows.Next() {
+		e, err := scanExportEvent(rows)
+		if err != nil {
+			return nil, 0, false, fmt.Errorf("export events: %w", err)
+		}
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, false, fmt.Errorf("export events: %w", err)
+	}
+	hasMore := len(out) > limit
+	if hasMore {
+		out = out[:limit]
+	}
+	cursor := after
+	if len(out) > 0 && out[len(out)-1].FinalizedSeq != nil {
+		cursor = *out[len(out)-1].FinalizedSeq
+	}
+	return out, cursor, hasMore, nil
+}
+
+func scanExportEvent(row pgx.Row) (*Event, error) {
+	var e Event
+	var seq int64
+	var params, nodes, details []byte
+	var actingAs, principal *string
+	if err := row.Scan(&seq, &e.ID, &e.OccurredAt, &e.RequestID, &e.Actor.Issuer, &e.Actor.OperatorID,
+		&e.Actor.Email, &e.Actor.ClientID, &actingAs, &principal, &e.Reason, &e.RootID, &nodes, &e.Service, &e.Method,
+		&e.Route, &params, &e.Path, &e.IP, &e.UserAgent, &e.Outcome, &e.Status, &e.ResponseBytes, &details,
+		&e.CreatedID); err != nil {
+		return nil, err
+	}
+	e.FinalizedSeq = &seq
+	e.OccurredAt = e.OccurredAt.UTC()
+	if err := json.Unmarshal(params, &e.Params); err != nil {
+		return nil, fmt.Errorf("params: %w", err)
+	}
+	if err := json.Unmarshal(nodes, &e.Nodes); err != nil {
+		return nil, fmt.Errorf("nodes: %w", err)
+	}
+	if actingAs != nil && principal != nil {
+		e.ActingAs = &ActingAs{MemberID: *actingAs, Principal: *principal}
+	}
+	if details != nil {
+		e.Details = json.RawMessage(details)
+	}
+	return &e, nil
 }
 
 func scanEvent(row pgx.Row) (*Event, error) {

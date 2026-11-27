@@ -20,11 +20,17 @@ import (
 
 // memStore keeps events in memory with the store's write rules.
 type memStore struct {
-	events     map[string]*Event
-	intentErr  error
-	outcomeErr error
-	listErr    error
-	filter     Filter
+	events       map[string]*Event
+	intentErr    error
+	outcomeErr   error
+	listErr      error
+	exportErr    error
+	exportEvents []*Event
+	exportCursor int64
+	exportMore   bool
+	exportAfter  int64
+	exportLimit  int
+	filter       Filter
 }
 
 func (m *memStore) CreateIntent(_ context.Context, in *Intent) (bool, error) {
@@ -63,6 +69,19 @@ func (m *memStore) List(_ context.Context, f Filter) ([]*Event, bool, error) {
 		out = append(out, e)
 	}
 	return out, false, m.listErr
+}
+
+func (m *memStore) Export(_ context.Context, after int64, limit int) ([]*Event, int64, bool, error) {
+	if m.exportErr != nil {
+		return nil, 0, false, m.exportErr
+	}
+	m.exportAfter = after
+	m.exportLimit = limit
+	cursor := m.exportCursor
+	if cursor == 0 {
+		cursor = after
+	}
+	return m.exportEvents, cursor, m.exportMore, nil
 }
 
 func mux(s store) http.Handler {
@@ -204,7 +223,7 @@ func TestStoreErrorMapping(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			s := &memStore{intentErr: c.err, outcomeErr: c.err, listErr: c.err}
+			s := &memStore{intentErr: c.err, outcomeErr: c.err, listErr: c.err, exportErr: c.err}
 			h := mux(s)
 
 			for _, req := range []struct {
@@ -212,12 +231,80 @@ func TestStoreErrorMapping(t *testing.T) {
 			}{
 				{"PUT", "/internal/events/r1", intentBody},
 				{"PATCH", "/internal/events/r1", outcomeBody},
+				{"GET", "/internal/events", ""},
 				{"GET", "/operator-audit-events", ""},
 			} {
 				w := call(h, req.method, req.target, req.body)
 				if w.Code != c.wantHTTP || code(t, w) != c.wantCode {
 					t.Errorf("%s %s: status=%d code=%s, want %d %s", req.method, req.target, w.Code, code(t, w), c.wantHTTP, c.wantCode)
 				}
+			}
+		})
+	}
+}
+
+func TestExport(t *testing.T) {
+	seq := int64(7)
+	status := 200
+	path := "/nodes"
+	s := &memStore{
+		exportEvents: []*Event{{
+			ID:           newID(now),
+			FinalizedSeq: &seq,
+			Intent: Intent{
+				RequestID:  "r-exp-1",
+				OccurredAt: now,
+				Actor:      Actor{Issuer: "https://idp", OperatorID: "op_1"},
+				Method:     "GET",
+				Path:       &path,
+				IP:         "10.0.0.1",
+			},
+			Outcome: OutcomeResponded,
+			Status:  &status,
+		}},
+		exportCursor: 7,
+		exportMore:   true,
+	}
+	h := mux(s)
+
+	w := call(h, "GET", "/internal/events?after=6&limit=5000", "")
+	if w.Code != 200 {
+		t.Fatalf("export: %d %s", w.Code, w.Body)
+	}
+	if s.exportAfter != 6 || s.exportLimit != maxExportLimit {
+		t.Fatalf("parsed export: after=%d limit=%d", s.exportAfter, s.exportLimit)
+	}
+	var resp struct {
+		AuditEvents []map[string]any `json:"audit_events"`
+		Cursor      string           `json:"cursor"`
+		HasMore     bool             `json:"has_more"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Cursor != "7" || !resp.HasMore || len(resp.AuditEvents) != 1 || resp.AuditEvents[0]["seq"] != "7" {
+		t.Fatalf("export response: %s", w.Body)
+	}
+
+	// Cursor ahead -> 409 CURSOR_AHEAD.
+	s.exportErr = ErrCursorAhead
+	if w := call(h, "GET", "/internal/events?after=99", ""); w.Code != 409 || code(t, w) != "CURSOR_AHEAD" {
+		t.Fatalf("cursor ahead: %d %s", w.Code, w.Body)
+	}
+	s.exportErr = nil
+
+	for name, q := range map[string]string{
+		"zero after":    "?after=0",
+		"leading zero":  "?after=01",
+		"negative":      "?after=-1",
+		"non-int after": "?after=abc",
+		"zero limit":    "?limit=0",
+		"unknown":       "?foo=bar",
+		"repeated":      "?limit=10&limit=20",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if w := call(h, "GET", "/internal/events"+q, ""); w.Code != 422 {
+				t.Fatalf("want 422, got %d %s", w.Code, w.Body)
 			}
 		})
 	}

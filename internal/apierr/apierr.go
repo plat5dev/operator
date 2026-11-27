@@ -72,6 +72,10 @@ func NotFound(w http.ResponseWriter, r *http.Request) {
 	write(w, r, http.StatusNotFound, "invalid_request_error", "NOT_FOUND", "Resource not found.", nil)
 }
 
+func CursorAhead(w http.ResponseWriter, r *http.Request) {
+	write(w, r, http.StatusConflict, "invalid_request_error", "CURSOR_AHEAD", "Cursor is ahead of the log.", nil)
+}
+
 // NotFoundResource is a 404 naming what wasn't found, such as a route's node.
 func NotFoundResource(w http.ResponseWriter, r *http.Request, resource, id string) {
 	write(w, r, http.StatusNotFound, "invalid_request_error", "NOT_FOUND", "Resource not found.",

@@ -23,13 +23,16 @@ func TestConfigServe(t *testing.T) {
 	}
 }
 
-func TestConfigMigrate(t *testing.T) {
+func TestConfigMigrateAndPrune(t *testing.T) {
 	c, err := loadConfig("migrate", env(map[string]string{"DATABASE_URL": "postgres://o@db/operator", "WRITER_ROLE": "audit_writer"}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if c.WriterRole != "audit_writer" {
 		t.Fatalf("%+v", c)
+	}
+	if _, err := loadConfig("prune", env(map[string]string{"DATABASE_URL": "postgres://o@db/operator"})); err != nil {
+		t.Fatalf("prune: %v", err)
 	}
 }
 

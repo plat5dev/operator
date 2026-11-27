@@ -28,11 +28,11 @@ Every variable each binary reads. Unset means the default; a blank value counts 
 
 ## operator-audit
 
-`cmd/operator-audit/`, image `ghcr.io/plat5dev/operator-audit`. Commands `migrate` and `serve` ([`internals/audit-storage.md`](../internals/audit-storage.md)).
+`cmd/operator-audit/`, image `ghcr.io/plat5dev/operator-audit`. Commands `migrate`, `serve`, and `prune` ([`internals/audit-storage.md`](../internals/audit-storage.md)).
 
 | Variable | Default | |
 |----------|---------|--|
 | `ADDR` | `:5005` | Public listener: `GET /operator-audit-events` |
-| `INTERNAL_PORT` | `8005` | `/health/*`, `/metrics`, `/internal/events` |
-| `DATABASE_URL` | | Required. The owner role for `migrate`, the writer for `serve` |
+| `INTERNAL_PORT` | `8005` | `/health/*`, `/metrics`, `/internal/events` (writes and export feed) |
+| `DATABASE_URL` | | Required. The owner role for `migrate` and `prune`, the writer for `serve` |
 | `WRITER_ROLE` | | Required by `migrate`. The role it grants the writer's rights |

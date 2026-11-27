@@ -176,11 +176,13 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, writerRole string) error {
 	grants := []string{
 		"REVOKE ALL ON SCHEMA audit FROM " + writer,
 		"REVOKE ALL ON ALL TABLES IN SCHEMA audit FROM " + writer,
+		"REVOKE ALL ON ALL SEQUENCES IN SCHEMA audit FROM " + writer,
 		"REVOKE ALL ON ALL FUNCTIONS IN SCHEMA audit FROM " + writer,
 		"GRANT USAGE ON SCHEMA audit TO " + writer,
 		"GRANT SELECT ON audit.schema_migrations TO " + writer,
 		"GRANT SELECT, INSERT ON audit.audit_events TO " + writer,
-		"GRANT UPDATE (outcome, status, response_bytes, details, created_id) ON audit.audit_events TO " + writer,
+		"GRANT UPDATE (outcome, status, response_bytes, details, created_id, finalized_seq) ON audit.audit_events TO " + writer,
+		"GRANT USAGE, SELECT ON SEQUENCE audit.export_seq TO " + writer,
 		"GRANT EXECUTE ON FUNCTION audit.ensure_partition(timestamptz) TO " + writer,
 	}
 	return pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
@@ -237,22 +239,23 @@ func CheckWriter(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("migration %s is not applied; run operator-audit migrate first", LatestVersion())
 	}
 	var me string
-	var owns, canDelete, canTruncate, canInsert, canPartition bool
+	var owns, canDelete, canTruncate, canInsert, canSeq, canPartition bool
 	if err := pool.QueryRow(ctx, `
 		SELECT current_user,
 			pg_has_role(current_user, n.nspowner, 'MEMBER'),
 			has_table_privilege('audit.audit_events', 'DELETE'),
 			has_table_privilege('audit.audit_events', 'TRUNCATE'),
 			has_table_privilege('audit.audit_events', 'INSERT'),
+			has_sequence_privilege('audit.export_seq', 'USAGE'),
 			has_function_privilege('audit.ensure_partition(timestamptz)', 'EXECUTE')
 		FROM pg_namespace n WHERE n.nspname = 'audit'
-	`).Scan(&me, &owns, &canDelete, &canTruncate, &canInsert, &canPartition); err != nil {
+	`).Scan(&me, &owns, &canDelete, &canTruncate, &canInsert, &canSeq, &canPartition); err != nil {
 		return err
 	}
 	if owns || canDelete || canTruncate {
 		return fmt.Errorf("%w: role %q can delete audit events; run serve as the writer role (docs/internals/audit-storage.md#roles)", ErrNotWriter, me)
 	}
-	if !canInsert || !canPartition {
+	if !canInsert || !canSeq || !canPartition {
 		return fmt.Errorf("%w: role %q cannot write audit events; run operator-audit migrate with WRITER_ROLE=%s", ErrNotWriter, me, me)
 	}
 	return nil

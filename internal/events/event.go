@@ -61,7 +61,8 @@ type Outcome struct {
 
 // Event is one stored request. The outcome fields are empty while pending.
 type Event struct {
-	ID string
+	ID           string
+	FinalizedSeq *int64
 	Intent
 	Outcome       string
 	Status        *int

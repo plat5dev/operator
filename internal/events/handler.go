@@ -7,6 +7,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,12 +16,17 @@ import (
 	"github.com/plat5dev/operator/internal/db"
 )
 
-const maxBodyBytes = 64 << 10
+const (
+	maxBodyBytes       = 64 << 10
+	defaultExportLimit = 100
+	maxExportLimit     = 1000
+)
 
 type store interface {
 	CreateIntent(ctx context.Context, in *Intent) (bool, error)
 	ApplyOutcome(ctx context.Context, requestID string, out *Outcome) (bool, error)
 	List(ctx context.Context, f Filter) ([]*Event, bool, error)
+	Export(ctx context.Context, after int64, limit int) ([]*Event, int64, bool, error)
 }
 
 type Handler struct {
@@ -32,9 +39,10 @@ func NewHandler(s store, log *slog.Logger) *Handler {
 	return &Handler{store: s, now: time.Now, log: log}
 }
 
-// MountInternal registers the gateway's writes, on the internal port: only the
-// deployment's network reaches it.
+// MountInternal registers the gateway's writes and the deployment-wide export
+// feed, on the internal port: only the deployment's network reaches it.
 func (h *Handler) MountInternal(mux *http.ServeMux) {
+	mux.HandleFunc("GET /internal/events", h.Export)
 	mux.HandleFunc("PUT /internal/events/{request_id}", h.PutIntent)
 	mux.HandleFunc("PATCH /internal/events/{request_id}", h.PatchOutcome)
 }
@@ -95,6 +103,17 @@ func (h *Handler) PatchOutcome(w http.ResponseWriter, r *http.Request) {
 type listResponse struct {
 	AuditEvents []eventResponse `json:"audit_events"`
 	HasMore     bool            `json:"has_more"`
+}
+
+type exportEventResponse struct {
+	Seq string `json:"seq"`
+	eventResponse
+}
+
+type exportResponse struct {
+	AuditEvents []exportEventResponse `json:"audit_events"`
+	Cursor      string                `json:"cursor"`
+	HasMore     bool                  `json:"has_more"`
 }
 
 type eventResponse struct {
@@ -173,6 +192,96 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// Export is GET /internal/events: finalized operator audit events in commit
+// order for SIEM / WORM archival (docs/reference/api/operator-audit.md#export).
+func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
+	after, limit, err := parseExportQuery(r.URL.RawQuery)
+	if err != nil {
+		invalid(w, r, err)
+		return
+	}
+	list, cursor, hasMore, err := h.store.Export(r.Context(), after, limit)
+	if errors.Is(err, ErrCursorAhead) {
+		apierr.CursorAhead(w, r)
+		return
+	}
+	if err != nil {
+		h.log.Error("export audit events", "request_id", apierr.RequestID(r.Context()), "err", err)
+		writeStoreErr(w, r, err)
+		return
+	}
+	resp := exportResponse{
+		AuditEvents: make([]exportEventResponse, 0, len(list)),
+		Cursor:      strconv.FormatInt(cursor, 10),
+		HasMore:     hasMore,
+	}
+	for _, e := range list {
+		seq := ""
+		if e.FinalizedSeq != nil {
+			seq = strconv.FormatInt(*e.FinalizedSeq, 10)
+		}
+		resp.AuditEvents = append(resp.AuditEvents, exportEventResponse{
+			Seq:           seq,
+			eventResponse: toResponse(e),
+		})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func parseExportQuery(raw string) (int64, int, error) {
+	q, err := url.ParseQuery(raw)
+	if err != nil {
+		return 0, 0, Invalid{"query"}
+	}
+	var after int64
+	limit := defaultExportLimit
+	var bad Invalid
+	for k, vals := range q {
+		if len(vals) != 1 {
+			bad = append(bad, k)
+			continue
+		}
+		v := strings.TrimSpace(vals[0])
+		switch k {
+		case "after":
+			n, ok := parseSeq(v)
+			if !ok {
+				bad = append(bad, k)
+				continue
+			}
+			after = n
+		case "limit":
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 1 {
+				bad = append(bad, k)
+				continue
+			}
+			limit = min(n, maxExportLimit)
+		default:
+			bad = append(bad, k)
+		}
+	}
+	if len(bad) > 0 {
+		return 0, 0, bad
+	}
+	return after, limit, nil
+}
+
+func parseSeq(v string) (int64, bool) {
+	if v == "" || v[0] < '1' || v[0] > '9' {
+		return 0, false
+	}
+	for i := 0; i < len(v); i++ {
+		if v[i] < '0' || v[i] > '9' {
+			return 0, false
+		}
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	return n, err == nil
 }
 
 func writeStoreErr(w http.ResponseWriter, r *http.Request, err error) {

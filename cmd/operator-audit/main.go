@@ -2,12 +2,16 @@
 // Contract: docs/reference/api/operator-audit.md.
 //
 //	operator-audit migrate   as the schema owner: migrations, then the writer's grants
-//	operator-audit serve     as the writer: the internal write API and the read route
+//	operator-audit serve     as the writer: the internal write/export API and the read route
+//	operator-audit prune     as the schema owner: drop monthly partitions older than cutoff
 package main
 
 import (
 	"context"
 	"errors"
+	"flag"
+	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -35,16 +39,18 @@ const (
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	cmd := ""
+	var args []string
 	if len(os.Args) > 1 {
 		cmd = os.Args[1]
+		args = os.Args[2:]
 	}
-	if err := run(cmd, log); err != nil {
+	if err := run(cmd, args, log); err != nil {
 		log.Error("exit", "cmd", cmd, "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(cmd string, log *slog.Logger) error {
+func run(cmd string, args []string, log *slog.Logger) error {
 	cfg, err := loadConfig(cmd, os.Getenv)
 	if err != nil {
 		return err
@@ -52,20 +58,61 @@ func run(cmd string, log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	pool, err := db.Connect(ctx, cfg.DatabaseURL)
-	if err != nil {
-		return err
-	}
-	defer pool.Close()
-
-	if cmd == "migrate" {
+	switch cmd {
+	case "migrate":
+		if len(args) > 0 {
+			return fmt.Errorf("unexpected arguments: %v", args)
+		}
+		pool, err := db.Connect(ctx, cfg.DatabaseURL)
+		if err != nil {
+			return err
+		}
+		defer pool.Close()
 		if err := db.Migrate(ctx, pool, cfg.WriterRole); err != nil {
 			return err
 		}
 		log.Info("migrated", "version", db.LatestVersion(), "writer_role", cfg.WriterRole)
 		return nil
+
+	case "prune":
+		fs := flag.NewFlagSet("prune", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		before := fs.String("before", "", "drop monthly partitions strictly older than YYYY-MM (UTC)")
+		olderThan := fs.String("older-than", "", "drop monthly partitions strictly older than <N>m (e.g. 12m)")
+		dryRun := fs.Bool("dry-run", false, "list partitions that would be dropped without dropping them")
+		if err := fs.Parse(args); err != nil {
+			return err
+		}
+		if fs.NArg() > 0 {
+			return fmt.Errorf("unexpected arguments: %v", fs.Args())
+		}
+		cutoff, err := db.ParsePruneCutoff(*before, *olderThan, time.Now())
+		if err != nil {
+			return err
+		}
+		pool, err := db.Connect(ctx, cfg.DatabaseURL)
+		if err != nil {
+			return err
+		}
+		defer pool.Close()
+		dropped, err := db.Prune(ctx, pool, cutoff, *dryRun)
+		if err != nil {
+			return err
+		}
+		log.Info("pruned", "cutoff", cutoff.Format("2006-01"), "dry_run", *dryRun, "count", len(dropped), "partitions", dropped)
+		return nil
+
+	default:
+		if len(args) > 0 {
+			return fmt.Errorf("unexpected arguments: %v", args)
+		}
+		pool, err := db.Connect(ctx, cfg.DatabaseURL)
+		if err != nil {
+			return err
+		}
+		defer pool.Close()
+		return serve(ctx, stop, cfg, pool, log)
 	}
-	return serve(ctx, stop, cfg, pool, log)
 }
 
 func serve(ctx context.Context, stop context.CancelFunc, cfg config, pool *pgxpool.Pool, log *slog.Logger) error {

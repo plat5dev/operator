@@ -41,8 +41,10 @@ func loadConfig(cmd string, getenv func(string) string) (config, error) {
 		if c.WriterRole == "" {
 			errs = append(errs, errors.New("WRITER_ROLE is required: migrate grants it the writer's rights"))
 		}
+	case "prune":
+		// DATABASE_URL only; cutoff flags are parsed by prune.
 	default:
-		errs = append(errs, errors.New("usage: operator-audit migrate|serve"))
+		errs = append(errs, errors.New("usage: operator-audit migrate|serve|prune"))
 	}
 	return c, errors.Join(errs...)
 }

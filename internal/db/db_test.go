@@ -100,11 +100,26 @@ func TestMigrateAndRoles(t *testing.T) {
 	if _, err := owner.Exec(ctx, `DELETE FROM audit_events`); err == nil || !strings.Contains(err.Error(), "not deleted") {
 		t.Errorf("owner delete: %v", err)
 	}
-	if _, err := writer.Exec(ctx, `UPDATE audit_events SET outcome = 'responded', status = 200, response_bytes = 1`); err != nil {
+	if _, err := writer.Exec(ctx, `UPDATE audit_events SET outcome = 'responded', status = 200, response_bytes = 1, finalized_seq = nextval('export_seq')`); err != nil {
 		t.Fatalf("pending -> final: %v", err)
 	}
 	if _, err := writer.Exec(ctx, `UPDATE audit_events SET outcome = 'rejected'`); err == nil || !strings.Contains(err.Error(), "already has an outcome") {
 		t.Errorf("final -> other: %v", err)
+	}
+	// Prune must be refused for the writer role, and work for the owner role.
+	if _, err := db.Prune(ctx, writer, time.Date(2025, 12, 1, 0, 0, 0, 0, time.UTC), true); err == nil {
+		t.Fatal("writer must not be allowed to prune")
+	}
+	if _, err := writer.Exec(ctx, `SELECT ensure_partition($1)`, time.Date(2025, 10, 15, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	dry, err := db.Prune(ctx, owner, time.Date(2025, 11, 1, 0, 0, 0, 0, time.UTC), true)
+	if err != nil || len(dry) != 1 || dry[0] != "audit_events_y2025m10" {
+		t.Fatalf("dry prune: %v %v", dry, err)
+	}
+	dropped, err := db.Prune(ctx, owner, time.Date(2025, 11, 1, 0, 0, 0, 0, time.UTC), false)
+	if err != nil || len(dropped) != 1 || dropped[0] != "audit_events_y2025m10" {
+		t.Fatalf("prune: %v %v", dropped, err)
 	}
 }
 

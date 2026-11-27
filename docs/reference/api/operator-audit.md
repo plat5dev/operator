@@ -139,3 +139,30 @@ PATCH /internal/events/{request_id}
 | Postgres unavailable | **503**. The gateway retries |
 
 `occurred_at` is optional; when sent (echoing the intent's timestamp), operator-audit prunes the update to that partition. `status` may be `null` only when the client was gone before an answer, so never with `responded`. `details` may be set on `responded` or `rejected`; `created_id` may be set only with `responded`. `response_bytes` is a non-negative integer.
+
+### Export
+
+Deployment-wide pull cursor feed of finalized operator audit events in strictly monotonic commit order, for external SIEM shipping and WORM archival (`GET /internal/events`).
+
+```
+GET /internal/events?after=6&limit=100
+→ 200
+{
+  "audit_events": [
+    { "seq": "7", "id": "01ja2z6q…", "occurred_at": "…", "request_id": "…", "outcome": "responded", ... }
+  ],
+  "cursor": "7",
+  "has_more": false
+}
+```
+
+| Param | |
+|-------|--|
+| `after` | Optional. Last `seq` cursor read (positive decimal integer, no leading zero); omitted starts from the beginning. Malformed → **422** |
+| `limit` | Optional. Default **100**, max **1000** (over-max clamped). Below 1 or non-integer → **422** |
+
+- Only finalized events (`responded`, `rejected`, `no_response`) are exported, ordered by finalization `seq`.
+- Each item carries all fields of the [event](#event) plus `"seq"` (decimal string).
+- `cursor` is the last returned `seq` (or `after`, or `"0"` when empty). Poll again immediately while `has_more` is `true`.
+- An `after` past the sequence head (e.g., database reset/recreate) answers **409** `CURSOR_AHEAD` (`details: null`). Partition pruning does not reset the sequence head.
+- Unknown or repeated query params → **422**. Postgres unavailable → **503**.

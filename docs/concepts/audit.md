@@ -89,6 +89,11 @@ None of them can create an event, or change its outcome, status, actor, nodes, r
 
 Access to read the operator audit log is controlled by the AuthZEN authorizer (or open to any authenticated operator when `authorizer.mode: disabled`).
 
+## Export and retention
+
+- **Export.** `operator-audit` exposes a pull cursor feed (`GET /internal/events`) on its `INTERNAL_PORT` returning finalized events in strictly monotonic commit order (`seq`) for external WORM archival and SIEM shipping ([`reference/api/operator-audit.md`](../reference/api/operator-audit.md#export)).
+- **Retention.** `operator-audit serve` runs as the non-deleting `Writer` role and cannot delete or truncate events. After archival, run `operator-audit prune --before YYYY-MM` (or `--older-than <N>m`) from a scheduled job under the schema `Owner` role to drop expired whole monthly partitions ([`internals/audit-storage.md`](../internals/audit-storage.md#pruning)).
+
 ## Not here
 
 - Request or response bodies, query strings, the token, or claims other than the actor fields, in an event
@@ -98,6 +103,6 @@ Access to read the operator audit log is controlled by the AuthZEN authorizer (o
 - Operator events in a Plat5 tree's log, or Plat5's audit service or database as this log's store
 - This log shown to customers
 - This gateway reading inside details, or a service header creating, moving or re-outcoming an event
-- Changing an event after its outcome, or deleting events through an API
+- Changing an event after its outcome, or deleting individual events through an API
 - Turning `pending` into anything else after the fact
-- Retention, purge, and export
+- Built-in SIEM, S3, or webhook push connectors
