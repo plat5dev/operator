@@ -11,6 +11,7 @@ CREATE TABLE audit_events (
     acting_as_member_id TEXT,
     acting_as_principal TEXT
         CHECK (acting_as_principal IN ('person', 'service_account')),
+    reason              TEXT,
     -- The route node's chain, root first: as sent, and its ids for the GIN index.
     root_id             TEXT,
     nodes               JSONB       NOT NULL DEFAULT '[]'::jsonb,
@@ -33,9 +34,9 @@ CREATE TABLE audit_events (
     -- the same body, so this is the request_id dedupe; the insert also checks
     -- request_id within a ±1 day occurred_at window to prune monthly partitions.
     UNIQUE (request_id, occurred_at),
-    -- A matched route, or the raw path of an unmatched request. Never both.
+    -- A matched route template, or the raw path of an unlisted/unmatched request. Never both.
     CHECK ((route IS NULL) <> (path IS NULL)),
-    CHECK ((route IS NULL) = (service IS NULL)),
+    CHECK (route IS NULL OR service IS NOT NULL),
     -- The root is the chain's head, and there is a chain only on a matched route.
     CHECK (root_id IS NOT DISTINCT FROM node_ids[1]),
     CHECK (jsonb_array_length(nodes) = cardinality(node_ids)),
@@ -48,6 +49,8 @@ CREATE TABLE audit_events (
 CREATE INDEX audit_events_operator_id ON audit_events (actor_operator_id, id DESC);
 CREATE INDEX audit_events_acting_as ON audit_events (acting_as_member_id, id DESC)
     WHERE acting_as_member_id IS NOT NULL;
+CREATE INDEX audit_events_reason ON audit_events (reason, id DESC)
+    WHERE reason IS NOT NULL;
 CREATE INDEX audit_events_node_ids ON audit_events USING GIN (node_ids);
 CREATE INDEX audit_events_params ON audit_events USING GIN (params jsonb_path_ops);
 -- Stale pending events are counted every minute.
@@ -68,12 +71,12 @@ BEGIN
     IF NEW.outcome = 'pending'
         OR (NEW.id, NEW.occurred_at, NEW.request_id, NEW.actor_issuer, NEW.actor_operator_id,
             NEW.actor_email, NEW.actor_client_id, NEW.acting_as_member_id, NEW.acting_as_principal,
-            NEW.root_id, NEW.nodes, NEW.node_ids, NEW.service, NEW.method, NEW.route,
+            NEW.reason, NEW.root_id, NEW.nodes, NEW.node_ids, NEW.service, NEW.method, NEW.route,
             NEW.params, NEW.path, NEW.ip, NEW.user_agent)
            IS DISTINCT FROM
            (OLD.id, OLD.occurred_at, OLD.request_id, OLD.actor_issuer, OLD.actor_operator_id,
             OLD.actor_email, OLD.actor_client_id, OLD.acting_as_member_id, OLD.acting_as_principal,
-            OLD.root_id, OLD.nodes, OLD.node_ids, OLD.service, OLD.method, OLD.route,
+            OLD.reason, OLD.root_id, OLD.nodes, OLD.node_ids, OLD.service, OLD.method, OLD.route,
             OLD.params, OLD.path, OLD.ip, OLD.user_agent)
     THEN
         RAISE EXCEPTION 'audit event % may only gain an outcome', OLD.request_id;

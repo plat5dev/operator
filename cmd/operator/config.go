@@ -3,20 +3,25 @@ package main
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/plat5dev/operator/internal/gateway"
+	"github.com/plat5dev/operator/internal/routes"
 )
 
 // config is the gateway's environment. Contract: docs/reference/env.md.
 type config struct {
-	Addr         string
-	InternalPort string
-	RoutesFile   string
-	// IdentityURL is Plat5 identity's public base URL. Required when a route names a node.
+	Addr            string
+	InternalPort    string
+	ConfigFile      string
+	ControlPlaneURL string
+	AuthorizerMode  string
+	AuthorizerURL   string
+	// IdentityURL is Plat5 identity's public base URL. Falls back to services.identity.url.
 	IdentityURL     string
 	Issuer          string
 	JWKSURI         string
@@ -24,11 +29,20 @@ type config struct {
 	IDClaim         string
 	EmailClaim      string
 	AllowedOrigins  []string
+	TrustedProxies  []netip.Prefix
 	UpstreamTimeout time.Duration
 	// AuditURL is operator-audit's internal base URL. Empty when audit is off.
 	AuditURL string
 	// Signer signs outgoing upstream requests when UPSTREAM_SIGNING_KEY is set.
 	Signer *gateway.Signer
+}
+
+func (c config) overrides() routes.Overrides {
+	return routes.Overrides{
+		ControlPlaneURL: c.ControlPlaneURL,
+		AuthorizerMode:  c.AuthorizerMode,
+		AuthorizerURL:   c.AuthorizerURL,
+	}
 }
 
 func loadConfig(getenv func(string) string) (config, error) {
@@ -39,15 +53,18 @@ func loadConfig(getenv func(string) string) (config, error) {
 		return def
 	}
 	c := config{
-		Addr:         get("ADDR", ":5004"),
-		InternalPort: get("INTERNAL_PORT", "8004"),
-		RoutesFile:   get("ROUTES_FILE", "routes.yml"),
-		IdentityURL:  strings.TrimRight(get("IDENTITY_URL", ""), "/"),
-		Issuer:       get("AUTH_ISSUER", ""),
-		JWKSURI:      get("AUTH_JWKS_URI", ""),
-		Audiences:    list(getenv("AUTH_ALLOWED_AUDIENCES")),
-		IDClaim:      get("AUTH_OPERATOR_ID_CLAIM", "sub"),
-		EmailClaim:   get("AUTH_OPERATOR_EMAIL_CLAIM", "email"),
+		Addr:            get("ADDR", ":5004"),
+		InternalPort:    get("INTERNAL_PORT", "8004"),
+		ConfigFile:      get("CONFIG_FILE", "operator.yml"),
+		ControlPlaneURL: strings.TrimRight(get("CONTROL_PLANE_URL", ""), "/"),
+		AuthorizerMode:  get("AUTHORIZER_MODE", ""),
+		AuthorizerURL:   strings.TrimRight(get("AUTHORIZER_URL", ""), "/"),
+		IdentityURL:     strings.TrimRight(get("IDENTITY_URL", ""), "/"),
+		Issuer:          get("AUTH_ISSUER", ""),
+		JWKSURI:         get("AUTH_JWKS_URI", ""),
+		Audiences:       list(getenv("AUTH_ALLOWED_AUDIENCES")),
+		IDClaim:         get("AUTH_OPERATOR_ID_CLAIM", "sub"),
+		EmailClaim:      get("AUTH_OPERATOR_EMAIL_CLAIM", "email"),
 	}
 	var errs []error
 	if c.Issuer == "" {
@@ -75,14 +92,18 @@ func loadConfig(getenv func(string) string) (config, error) {
 		}
 		c.AllowedOrigins = append(c.AllowedOrigins, origin)
 	}
+	trusted, err := gateway.ParseTrustedProxies(getenv("TRUSTED_PROXIES"))
+	if err != nil {
+		errs = append(errs, err)
+	} else {
+		c.TrustedProxies = trusted
+	}
 	if c.IdentityURL != "" {
 		if u, err := url.Parse(c.IdentityURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") ||
 			u.Host == "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
 			errs = append(errs, errors.New("IDENTITY_URL must be an http or https URL"))
 		}
 	}
-	// Audit is on unless AUDIT_ENABLED=false. On, a forgotten URL fails boot instead of
-	// silently turning audit off.
 	switch get("AUDIT_ENABLED", "true") {
 	case "true":
 		c.AuditURL = strings.TrimRight(get("AUDIT_URL", ""), "/")

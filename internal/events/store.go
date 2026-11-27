@@ -29,7 +29,7 @@ type Store struct {
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
 const eventColumns = `id, occurred_at, request_id, actor_issuer, actor_operator_id, actor_email,
-	actor_client_id, acting_as_member_id, acting_as_principal, root_id, nodes, service, method, route,
+	actor_client_id, acting_as_member_id, acting_as_principal, reason, root_id, nodes, service, method, route,
 	params, path, ip, user_agent, outcome, status, response_bytes, details, created_id`
 
 // CreateIntent writes a pending event unless one exists for the request id. created is
@@ -59,11 +59,11 @@ func (s *Store) CreateIntent(ctx context.Context, in *Intent) (created bool, err
 		// monthly partitions) and let the index catch two identical intents racing.
 		return s.pool.Exec(ctx, `
 			INSERT INTO audit_events (id, occurred_at, request_id, actor_issuer, actor_operator_id,
-				actor_email, actor_client_id, acting_as_member_id, acting_as_principal, root_id, nodes,
+				actor_email, actor_client_id, acting_as_member_id, acting_as_principal, reason, root_id, nodes,
 				node_ids, service, method, route, params, path, ip, user_agent)
 			SELECT $1::text, $2::timestamptz, $3::text, $4::text, $5::text, $6::text, $7::text,
-				$8::text, $9::text, $10::text, $11::jsonb, $12::text[], $13::text, $14::text, $15::text,
-				$16::jsonb, $17::text, $18::text, $19::text
+				$8::text, $9::text, $10::text, $11::text, $12::jsonb, $13::text[], $14::text, $15::text, $16::text,
+				$17::jsonb, $18::text, $19::text, $20::text
 			WHERE NOT EXISTS (
 				SELECT 1 FROM audit_events
 				WHERE request_id = $3::text
@@ -72,7 +72,7 @@ func (s *Store) CreateIntent(ctx context.Context, in *Intent) (created bool, err
 			)
 			ON CONFLICT DO NOTHING
 		`, newID(in.OccurredAt), in.OccurredAt, in.RequestID, in.Actor.Issuer, in.Actor.OperatorID,
-			in.Actor.Email, in.Actor.ClientID, actingAs, principal, in.RootID, string(nodes), nodeIDs,
+			in.Actor.Email, in.Actor.ClientID, actingAs, principal, in.Reason, in.RootID, string(nodes), nodeIDs,
 			in.Service, in.Method, in.Route, string(params), in.Path, in.IP, in.UserAgent)
 	}
 	tag, err := insert()
@@ -155,6 +155,9 @@ func (s *Store) List(ctx context.Context, f Filter) ([]*Event, bool, error) {
 	if f.ActingAsMember != "" {
 		add("acting_as_member_id = ?", f.ActingAsMember)
 	}
+	if f.Reason != "" {
+		add("reason = ?", f.Reason)
+	}
 	if f.NodeID != "" {
 		add("node_ids @> ARRAY[?::text]", f.NodeID)
 	}
@@ -227,7 +230,7 @@ func scanEvent(row pgx.Row) (*Event, error) {
 	var params, nodes, details []byte
 	var actingAs, principal *string
 	if err := row.Scan(&e.ID, &e.OccurredAt, &e.RequestID, &e.Actor.Issuer, &e.Actor.OperatorID,
-		&e.Actor.Email, &e.Actor.ClientID, &actingAs, &principal, &e.RootID, &nodes, &e.Service, &e.Method,
+		&e.Actor.Email, &e.Actor.ClientID, &actingAs, &principal, &e.Reason, &e.RootID, &nodes, &e.Service, &e.Method,
 		&e.Route, &params, &e.Path, &e.IP, &e.UserAgent, &e.Outcome, &e.Status, &e.ResponseBytes, &details,
 		&e.CreatedID); err != nil {
 		return nil, err

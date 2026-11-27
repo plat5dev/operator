@@ -30,6 +30,7 @@ const (
 	maxParamValueLen = audit.MaxParamValueBytes
 	maxIPLen         = audit.MaxIPLen
 	maxUserAgentLen  = audit.MaxUserAgentChars
+	maxReasonChars   = audit.MaxReasonChars
 	maxDetailsBytes  = audit.MaxDetailsBytes
 	// An intent is written as the request arrives. Far from now is a bug, and would
 	// ask for a partition nobody maintains.
@@ -65,6 +66,7 @@ type intentBody struct {
 	OccurredAt *string           `json:"occurred_at"`
 	Actor      *actorBody        `json:"actor"`
 	ActingAs   *actingAsBody     `json:"acting_as"`
+	Reason     *string           `json:"reason"`
 	RootID     *string           `json:"root_id"`
 	Nodes      *[]nodeBody       `json:"nodes"`
 	Service    *string           `json:"service"`
@@ -151,7 +153,7 @@ func ParseIntent(requestID string, body []byte, now time.Time) (*Intent, error) 
 		in.Method = *req.Method
 	}
 
-	// A matched request names its service and route. An unmatched one has only its path.
+	// A matched route names its service and route. An unlisted/unmatched one has path (and optional service).
 	switch {
 	case req.Route != nil && req.Path == nil:
 		if req.Service == nil || len(*req.Service) > maxServiceLen || !serviceRe.MatchString(*req.Service) {
@@ -166,7 +168,11 @@ func ParseIntent(requestID string, body []byte, now time.Time) (*Intent, error) 
 		}
 	case req.Route == nil && req.Path != nil:
 		if req.Service != nil {
-			bad.add("service")
+			if len(*req.Service) > maxServiceLen || !serviceRe.MatchString(*req.Service) {
+				bad.add("service")
+			} else {
+				in.Service = req.Service
+			}
 		}
 		if p := *req.Path; p == "" || utf8.RuneCountInString(p) > maxPathChars || !storable(p) {
 			bad.add("path")
@@ -228,6 +234,13 @@ func ParseIntent(requestID string, body []byte, now time.Time) (*Intent, error) 
 	}
 
 	in.IP = text(&bad, "ip", req.IP, maxIPLen)
+	if req.Reason != nil {
+		if *req.Reason == "" || !storable(*req.Reason) || utf8.RuneCountInString(*req.Reason) > maxReasonChars {
+			bad.add("reason")
+		} else {
+			in.Reason = req.Reason
+		}
+	}
 	if req.UserAgent != nil {
 		if !storable(*req.UserAgent) || utf8.RuneCountInString(*req.UserAgent) > maxUserAgentLen {
 			bad.add("user_agent")
@@ -291,9 +304,9 @@ func ParseOutcome(requestID string, body []byte) (*Outcome, error) {
 
 	if !isNull(req.Details) {
 		details := bytes.TrimSpace(req.Details)
-		// Details come from the upstream response, so only a response has them.
+		// Details come from the upstream response (responded) or AuthZEN denial (rejected).
 		// Postgres cannot store a NUL in jsonb.
-		if out.Outcome != OutcomeResponded || len(details) > maxDetailsBytes || details[0] != '{' ||
+		if (out.Outcome != OutcomeResponded && out.Outcome != OutcomeRejected) || len(details) > maxDetailsBytes || details[0] != '{' ||
 			!json.Valid(details) || bytes.Contains(details, []byte(`\u0000`)) {
 			bad.add("details")
 		} else {
@@ -372,6 +385,12 @@ func ParseFilter(rawQuery string) (Filter, error) {
 			f.OperatorID = text(&bad, key, &value, maxActorLen)
 		case "acting_as_member_id":
 			f.ActingAsMember = text(&bad, key, &value, maxIDLen)
+		case "reason":
+			if value == "" || !storable(value) || utf8.RuneCountInString(value) > maxReasonChars {
+				bad.add(key)
+				continue
+			}
+			f.Reason = value
 		case "node_id":
 			f.NodeID = text(&bad, key, &value, maxIDLen)
 		case "created_id":

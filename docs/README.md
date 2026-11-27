@@ -7,16 +7,16 @@
 | You're | Read |
 |--------|------|
 | Learning the operator plane | [model](concepts/model.md), then [requests](concepts/requests.md) |
-| Running it | [env](reference/env.md), [routes](reference/routes.md), [`compose/`](../compose/README.md) |
-| Building a console or an operator tool | [requests](concepts/requests.md), [operator-audit API](reference/api/operator-audit.md) |
+| Running it | [config](reference/config.md), [env](reference/env.md), [`compose/`](../compose/README.md) |
+| Building a console or an operator tool | [requests](concepts/requests.md), [gateway](reference/gateway.md#route-checks), [operator-audit API](reference/api/operator-audit.md) |
 | Writing a service operators call | Plat5's write-a-service guide, then [headers](reference/headers.md) |
 
 ## Concepts
 
 | Doc | What it decides |
 |-----|-----------------|
-| [model](concepts/model.md) | Operators, routes, the chain, acting as a member; the principles |
-| [requests](concepts/requests.md) | The credential, how a request is decided, the route node, acting as a member, forwarding |
+| [model](concepts/model.md) | Operators, services, the chain, acting as a member, authorization; the principles |
+| [requests](concepts/requests.md) | The credential, how a request is decided, service routing, node resolution, acting as a member, authorization, forwarding |
 | [audit](concepts/audit.md) | What the operator log records, delivery, what a service adds |
 | [boundaries](concepts/boundaries.md) | What this plane is for and won't do |
 
@@ -24,9 +24,9 @@
 
 | Doc | |
 |-----|--|
-| [routes](reference/routes.md) | The route file |
+| [config](reference/config.md) | `operator.yml`: services, control-plane discovery, AuthZEN authorizer, policy claims, built-in templates |
 | [headers](reference/headers.md) | Every header set, stripped or read |
-| [gateway](reference/gateway.md) | Identity calls and cache, CORS, security headers, errors, request log, metrics |
+| [gateway](reference/gateway.md) | Identity calls and cache, AuthZEN, route checks, trusted proxies, CORS, security headers, errors, request log, metrics |
 | [idp](reference/idp.md) | The operator JWT |
 | [env](reference/env.md) | Both binaries' environment |
 | [api/operator-audit](reference/api/operator-audit.md) | Operator audit events, the read API, the gateway's writes |

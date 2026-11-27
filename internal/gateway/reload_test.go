@@ -30,7 +30,7 @@ func TestUpstreamSigningEndToEnd(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	table, err := routes.Parse([]byte(fmt.Sprintf(`
+	cfg, err := routes.Parse([]byte(fmt.Sprintf(`
 services:
   app:
     url: %s
@@ -38,8 +38,9 @@ services:
       - path: /projects/{project}/items
         methods: [POST]
         node: project
-        as_member: true
-`, upstream.URL)))
+authorizer:
+  mode: disabled
+`, upstream.URL)), routes.Overrides{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +53,7 @@ services:
 	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
 
 	gw := New(Config{
-		Routes:          table,
+		Registry:        routes.NewRegistry(cfg),
 		Auth:            fakeAuth{},
 		Identity:        fakeIdentity{},
 		UpstreamTimeout: 5 * time.Second,
@@ -60,7 +61,7 @@ services:
 		Log:             slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 
-	req := httptest.NewRequest("POST", "/projects/"+projectID+"/items?dry_run=1", nil)
+	req := httptest.NewRequest("POST", "/services/app/projects/"+projectID+"/items?dry_run=1", nil)
 	req.Header.Set("Authorization", "Bearer good")
 	req.Header.Set(asMemberHeader, danaID)
 	req.Header.Set("X-Plat5-Signature", "v1,kid=forged,t=1,sig=forged")
@@ -94,6 +95,7 @@ services:
 		t.Fatal(err)
 	}
 
+	// Upstream receives the stripped path (without /services/app).
 	if gotURI != "/projects/"+projectID+"/items?dry_run=1" {
 		t.Fatalf("gotURI = %q", gotURI)
 	}
@@ -103,7 +105,7 @@ services:
 	}
 }
 
-func TestReloadSwapsRoutesAndRefusesInvalidUpdate(t *testing.T) {
+func TestReloadSwapsServices(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -111,17 +113,17 @@ func TestReloadSwapsRoutesAndRefusesInvalidUpdate(t *testing.T) {
 
 	initial, err := routes.Parse([]byte(fmt.Sprintf(`
 services:
-  app:
+  app1:
     url: %s
-    routes:
-      - path: /v1/ping
-        methods: [GET]
-`, upstream.URL)))
+authorizer:
+  mode: disabled
+`, upstream.URL)), routes.Overrides{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	reg := routes.NewRegistry(initial)
 	gw := New(Config{
-		Routes:          initial,
+		Registry:        reg,
 		Auth:            fakeAuth{},
 		UpstreamTimeout: 5 * time.Second,
 		Log:             slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -135,52 +137,28 @@ services:
 		return res.Code
 	}
 
-	if code := call("/v1/ping"); code != http.StatusOK {
-		t.Fatalf("/v1/ping = %d, want 200", code)
+	if code := call("/services/app1/ping"); code != http.StatusOK {
+		t.Fatalf("app1 = %d, want 200", code)
 	}
-	if code := call("/v2/ping"); code != http.StatusNotFound {
-		t.Fatalf("/v2/ping before reload = %d, want 404", code)
-	}
-
-	// Reload adding a node route without IDENTITY_URL configured must fail and keep /v1/ping live.
-	withNodes, err := routes.Parse([]byte(fmt.Sprintf(`
-services:
-  app:
-    url: %s
-    routes:
-      - path: /projects/{project}
-        methods: [GET]
-        node: project
-`, upstream.URL)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := gw.Reload(withNodes); err == nil {
-		t.Fatal("expected error reloading node routes without identity client")
-	}
-	if code := call("/v1/ping"); code != http.StatusOK {
-		t.Fatalf("/v1/ping after failed reload = %d, want 200", code)
+	if code := call("/services/app2/ping"); code != http.StatusNotFound {
+		t.Fatalf("app2 before reload = %d, want 404", code)
 	}
 
-	// Valid reload replaces the route table atomically.
 	updated, err := routes.Parse([]byte(fmt.Sprintf(`
 services:
-  app:
+  app2:
     url: %s
-    routes:
-      - path: /v2/ping
-        methods: [GET]
-`, upstream.URL)))
+authorizer:
+  mode: disabled
+`, upstream.URL)), routes.Overrides{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := gw.Reload(updated); err != nil {
-		t.Fatal(err)
+	reg.SetConfig(updated)
+	if code := call("/services/app1/ping"); code != http.StatusNotFound {
+		t.Fatalf("app1 after reload = %d, want 404", code)
 	}
-	if code := call("/v1/ping"); code != http.StatusNotFound {
-		t.Fatalf("/v1/ping after reload = %d, want 404", code)
-	}
-	if code := call("/v2/ping"); code != http.StatusOK {
-		t.Fatalf("/v2/ping after reload = %d, want 200", code)
+	if code := call("/services/app2/ping"); code != http.StatusOK {
+		t.Fatalf("app2 after reload = %d, want 200", code)
 	}
 }

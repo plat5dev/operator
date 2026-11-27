@@ -6,7 +6,7 @@ For implementers. The contract is [audit](../concepts/audit.md) and the [operato
 
 The log lives in the operator plane's own Postgres, never Plat5's. Other operator-plane concerns may share the instance later, each in its own schema with its own roles.
 
-`audit_events` in schema `audit`, partitioned by month on `occurred_at`, unique on `request_id`. The chain is stored twice, as Plat5's audit does: `nodes` as sent, and `node_ids` (`text[]`) with a GIN index for reads by node. Indexes back the operator, member-acted-as and params filters. Check constraints keep `root_id` the chain's head and a matched route or a raw path, never both. Partitions are kept from last month to two months ahead, checked at boot and hourly; an intent outside them creates its month.
+`audit_events` in schema `audit`, partitioned by month on `occurred_at`, unique on `(request_id, occurred_at)`. The chain is stored twice, as Plat5's audit does: `nodes` as sent, and `node_ids` (`text[]`) with a GIN index for reads by node. Indexes back the operator, member-acted-as, reason, and params filters. Check constraints keep `root_id` the chain's head, `route` or raw `path` (never both), `service` required whenever `route` is set (and optional when `path` is set, for unlisted paths on a known service). Partitions are kept from last month to two months ahead, checked at boot and hourly; an intent outside them creates its month.
 
 One migration, `001_init.sql`.
 

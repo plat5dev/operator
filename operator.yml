@@ -1,0 +1,16 @@
+# Default operator gateway config. Contract: docs/reference/config.md.
+# Core Plat5 services carry built-in route templates for node resolution and normalized
+# audit routes; app services and their upstream routes are discovered from control_plane.
+control_plane:
+  url: http://control-plane:5003
+
+services:
+  identity:
+    url: http://identity:3000
+  audit:
+    url: http://audit:3002
+  operator-audit:
+    url: http://operator-audit:5005
+
+authorizer:
+  mode: authzen

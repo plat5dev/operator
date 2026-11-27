@@ -1,205 +1,275 @@
-// Package routes loads this gateway's route file and matches requests. Contract:
-// docs/reference/routes.md.
+// Package routes loads operator.yml, merges Plat5 control-plane service/route discovery
+// with built-in core templates, and resolves /services/{service}/{path...} requests.
+// Contract: docs/reference/config.md.
 package routes
 
 import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/plat5dev/operator/internal/audit"
 )
 
-// Service is one service address and the routes this gateway forwards to it.
-type Service struct {
-	URL    string   `yaml:"url"`
-	Routes []*Route `yaml:"routes"`
+const (
+	AuthorizerModeAuthZEN  = "authzen"
+	AuthorizerModeDisabled = "disabled"
+	defaultAuthzTimeout    = 2 * time.Second
+	maxPolicyClaims        = 32
+)
+
+// Overrides are optional environment overrides layered onto operator.yml.
+type Overrides struct {
+	ControlPlaneURL string
+	AuthorizerMode  string
+	AuthorizerURL   string
 }
 
+// Config is the validated operator.yml file.
+type Config struct {
+	ControlPlaneURL string
+	Services        map[string]*Service
+	Authorizer      AuthorizerConfig
+	PolicyClaims    []string
+}
+
+// AuthorizerConfig is the validated authorizer section.
+type AuthorizerConfig struct {
+	Mode     string
+	URL      string
+	Timeout  time.Duration
+	TokenEnv string
+}
+
+// Service is one explicit service entry in operator.yml.
+type Service struct {
+	Name    string
+	Target  *url.URL
+	Timeout time.Duration
+	Routes  []*Route
+}
+
+// Route is a single compiled route template (for route normalization and node extraction).
 type Route struct {
-	Path    string  `yaml:"path"`
-	Methods Methods `yaml:"methods"`
-	// Node is the param holding the Plat5 node id the route addresses, or "".
-	Node string `yaml:"node"`
-	// AsMember allows callers to send X-Plat5-As-Member on this route's verbs. A
-	// verb's own as_member overrides it.
-	AsMember bool `yaml:"as_member"`
+	Path        string   `yaml:"path"`
+	Methods     []string `yaml:"methods"`
+	Node        string   `yaml:"node"`
+	Permissions []string `yaml:"-"`
 
 	segments   []segment
 	paramCount int
-	// verbs are the route's methods, each with whether it allows X-Plat5-As-Member.
-	verbs   map[string]bool
-	service string
-	target  *url.URL
+	verbs      map[string]bool
 }
-
-// Methods are a route's verbs: a list, or a map of verb to null or its settings. A list
-// is a map with no overrides.
-type Methods []Method
-
-// Method is one verb and its settings.
-type Method struct {
-	Verb string
-	// AsMember overrides the route's as_member, or is nil.
-	AsMember *bool
-}
-
-func (ms *Methods) UnmarshalYAML(n *yaml.Node) error {
-	switch n.Kind {
-	case yaml.SequenceNode:
-		var verbs []string
-		if err := n.Decode(&verbs); err != nil {
-			return err
-		}
-		for _, v := range verbs {
-			*ms = append(*ms, Method{Verb: v})
-		}
-	case yaml.MappingNode:
-		for i := 0; i+1 < len(n.Content); i += 2 {
-			k, v := n.Content[i], n.Content[i+1]
-			if k.Kind != yaml.ScalarNode {
-				return fmt.Errorf("line %d: a method is a verb", k.Line)
-			}
-			m := Method{Verb: k.Value}
-			switch {
-			case v.Tag == "!!null":
-			case v.Kind == yaml.MappingNode:
-				// The only setting is as_member. Anything else refuses boot.
-				for j := 0; j+1 < len(v.Content); j += 2 {
-					f := v.Content[j]
-					if f.Value != "as_member" {
-						return fmt.Errorf("line %d: field %s not allowed in %s's settings", f.Line, f.Value, m.Verb)
-					}
-					if m.AsMember != nil {
-						return fmt.Errorf("line %d: as_member repeated in %s's settings", f.Line, m.Verb)
-					}
-					var b bool
-					if err := v.Content[j+1].Decode(&b); err != nil {
-						return err
-					}
-					m.AsMember = &b
-				}
-			default:
-				return fmt.Errorf("line %d: %s's settings must be null or a map", v.Line, m.Verb)
-			}
-			*ms = append(*ms, m)
-		}
-	default:
-		return fmt.Errorf("line %d: methods must be a list or a map", n.Line)
-	}
-	return nil
-}
-
-// Service is the name of the service this route belongs to.
-func (r *Route) Service() string { return r.service }
-
-// Target is the parsed upstream URL: scheme, host, and port.
-func (r *Route) Target() *url.URL { return r.target }
 
 type segment struct {
 	literal string
 	param   string
 }
 
-type Table struct {
-	routes []*Route
-}
-
-func (t *Table) Len() int { return len(t.routes) }
-
-// Routes returns every route, grouped by service name.
-func (t *Table) Routes() []*Route { return t.routes }
-
-// HasNodes is whether any route names a node, so the gateway needs identity.
-func (t *Table) HasNodes() bool {
-	for _, r := range t.routes {
-		if r.Node != "" {
-			return true
-		}
-	}
-	return false
-}
-
 var (
-	nameRe  = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
-	paramRe = regexp.MustCompile(`^\{([a-z][a-z0-9_]*)\}$`)
-	// {project.id}: in Plat5, a value its gateway fills in.
+	nameRe   = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+	paramRe  = regexp.MustCompile(`^\{([a-z][a-z0-9_]*)\}$`)
 	dottedRe = regexp.MustCompile(`^\{[^{}]*\.[^{}]*\}$`)
+	claimRe  = regexp.MustCompile(`^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$`)
 	allowed  = map[string]bool{"GET": true, "HEAD": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true}
 )
 
-func Load(path string) (*Table, error) {
+type rawFile struct {
+	ControlPlane *rawControlPlane       `yaml:"control_plane"`
+	Services     map[string]*rawService `yaml:"services"`
+	Authorizer   *rawAuthorizer         `yaml:"authorizer"`
+	PolicyClaims []string               `yaml:"policy_claims"`
+}
+
+type rawControlPlane struct {
+	URL string `yaml:"url"`
+}
+
+type rawService struct {
+	URL     string   `yaml:"url"`
+	Timeout string   `yaml:"timeout"`
+	Routes  []*Route `yaml:"routes"`
+}
+
+type rawAuthorizer struct {
+	Mode     string `yaml:"mode"`
+	URL      string `yaml:"url"`
+	Timeout  string `yaml:"timeout"`
+	TokenEnv string `yaml:"token_env"`
+}
+
+func Load(path string, ov Overrides) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	t, err := Parse(data)
+	cfg, err := Parse(data, ov)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	return t, nil
+	return cfg, nil
 }
 
-func Parse(data []byte) (*Table, error) {
-	var file struct {
-		Services map[string]*Service `yaml:"services"`
+func Parse(data []byte, ov Overrides) (*Config, error) {
+	var file rawFile
+	if len(bytes.TrimSpace(data)) > 0 {
+		dec := yaml.NewDecoder(bytes.NewReader(data))
+		dec.KnownFields(true)
+		if err := dec.Decode(&file); err != nil && !errors.Is(err, io.EOF) {
+			return nil, err
+		}
 	}
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
-	if err := dec.Decode(&file); err != nil {
-		return nil, err
+
+	cfg := &Config{
+		Services: map[string]*Service{},
+		Authorizer: AuthorizerConfig{
+			Mode:    AuthorizerModeAuthZEN,
+			Timeout: defaultAuthzTimeout,
+		},
 	}
-	if file.Services == nil {
-		return nil, errors.New("services: missing")
+
+	if file.ControlPlane != nil {
+		cfg.ControlPlaneURL = strings.TrimSpace(file.ControlPlane.URL)
 	}
+	if ov.ControlPlaneURL != "" {
+		cfg.ControlPlaneURL = strings.TrimSpace(ov.ControlPlaneURL)
+	}
+	if cfg.ControlPlaneURL != "" {
+		u, err := parseBaseURL(cfg.ControlPlaneURL)
+		if err != nil {
+			return nil, fmt.Errorf("control_plane.url: %w", err)
+		}
+		cfg.ControlPlaneURL = strings.TrimRight(u.String(), "/")
+	}
+
+	if file.Authorizer != nil {
+		if m := strings.TrimSpace(file.Authorizer.Mode); m != "" {
+			cfg.Authorizer.Mode = m
+		}
+		cfg.Authorizer.URL = strings.TrimSpace(file.Authorizer.URL)
+		if t := strings.TrimSpace(file.Authorizer.Timeout); t != "" {
+			d, err := time.ParseDuration(t)
+			if err != nil || d <= 0 {
+				return nil, fmt.Errorf("authorizer.timeout: must be a positive duration such as 2s")
+			}
+			cfg.Authorizer.Timeout = d
+		}
+		cfg.Authorizer.TokenEnv = strings.TrimSpace(file.Authorizer.TokenEnv)
+	}
+	if ov.AuthorizerMode != "" {
+		cfg.Authorizer.Mode = strings.TrimSpace(ov.AuthorizerMode)
+	}
+	if ov.AuthorizerURL != "" {
+		cfg.Authorizer.URL = strings.TrimSpace(ov.AuthorizerURL)
+	}
+	switch cfg.Authorizer.Mode {
+	case AuthorizerModeAuthZEN:
+		if cfg.Authorizer.URL == "" {
+			return nil, errors.New("authorizer.url is required when authorizer.mode is authzen")
+		}
+		u, err := parseBaseURL(cfg.Authorizer.URL)
+		if err != nil {
+			return nil, fmt.Errorf("authorizer.url: %w", err)
+		}
+		cfg.Authorizer.URL = strings.TrimRight(u.String(), "/")
+	case AuthorizerModeDisabled:
+		if cfg.Authorizer.URL != "" {
+			if _, err := parseBaseURL(cfg.Authorizer.URL); err != nil {
+				return nil, fmt.Errorf("authorizer.url: %w", err)
+			}
+		}
+	default:
+		return nil, fmt.Errorf("authorizer.mode: must be %q or %q", AuthorizerModeAuthZEN, AuthorizerModeDisabled)
+	}
+
+	if len(file.PolicyClaims) > maxPolicyClaims {
+		return nil, fmt.Errorf("policy_claims: at most %d claims", maxPolicyClaims)
+	}
+	seenClaim := map[string]bool{}
+	for _, c := range file.PolicyClaims {
+		c = strings.TrimSpace(c)
+		if !claimRe.MatchString(c) {
+			return nil, fmt.Errorf("policy_claims: invalid claim path %q", c)
+		}
+		if !seenClaim[c] {
+			seenClaim[c] = true
+			cfg.PolicyClaims = append(cfg.PolicyClaims, c)
+		}
+	}
+
 	names := make([]string, 0, len(file.Services))
 	for name := range file.Services {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 
-	var all []*Route
 	for _, name := range names {
-		svc := file.Services[name]
+		raw := file.Services[name]
 		if !nameRe.MatchString(name) || len(name) > audit.MaxServiceLen {
 			return nil, fmt.Errorf("services.%s: name must match %s and be at most %d bytes", name, nameRe, audit.MaxServiceLen)
 		}
-		if svc == nil {
+		if raw == nil {
 			return nil, fmt.Errorf("services.%s: empty", name)
 		}
-		target, err := parseURL(svc.URL)
-		if err != nil {
-			return nil, fmt.Errorf("services.%s.url: %w", name, err)
+		svc := &Service{Name: name}
+		if uStr := strings.TrimSpace(raw.URL); uStr != "" {
+			u, err := parseURL(uStr)
+			if err != nil {
+				return nil, fmt.Errorf("services.%s.url: %w", name, err)
+			}
+			svc.Target = u
+		} else if cfg.ControlPlaneURL == "" {
+			return nil, fmt.Errorf("services.%s.url: required when control_plane.url is not configured", name)
 		}
-		if len(svc.Routes) == 0 {
-			return nil, fmt.Errorf("services.%s.routes: missing", name)
+		if raw.Timeout != "" {
+			d, err := time.ParseDuration(raw.Timeout)
+			if err != nil || d <= 0 {
+				return nil, fmt.Errorf("services.%s.timeout: must be a positive duration", name)
+			}
+			svc.Timeout = d
 		}
-		for i, r := range svc.Routes {
+		for i, r := range raw.Routes {
 			if r == nil {
 				return nil, fmt.Errorf("services.%s.routes[%d]: empty", name, i)
 			}
-			r.service, r.target = name, target
 			if err := r.compile(); err != nil {
 				return nil, fmt.Errorf("services.%s.routes[%d] %s: %w", name, i, r.Path, err)
 			}
-			all = append(all, r)
+			svc.Routes = append(svc.Routes, r)
 		}
-	}
-	for i, a := range all {
-		for _, b := range all[i+1:] {
-			if overlaps(a, b) {
-				return nil, fmt.Errorf("routes %s (%s) and %s (%s) can match the same request", a.Path, a.service, b.Path, b.service)
+		for i, a := range svc.Routes {
+			for _, b := range svc.Routes[i+1:] {
+				if overlaps(a, b) {
+					return nil, fmt.Errorf("services.%s: routes %s and %s can match the same request", name, a.Path, b.Path)
+				}
 			}
 		}
+		cfg.Services[name] = svc
 	}
-	return &Table{routes: all}, nil
+
+	if len(cfg.Services) == 0 && cfg.ControlPlaneURL == "" {
+		return nil, errors.New("at least one service or control_plane.url is required")
+	}
+
+	return cfg, nil
+}
+
+// IdentityURL returns services.identity.url if explicitly configured, else "".
+func (c *Config) IdentityURL() string {
+	if s, ok := c.Services["identity"]; ok && s.Target != nil {
+		return s.Target.String()
+	}
+	return ""
 }
 
 func parseURL(raw string) (*url.URL, error) {
@@ -209,6 +279,17 @@ func parseURL(raw string) (*url.URL, error) {
 	}
 	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
 		return nil, errors.New("must be scheme://host[:port] with no path")
+	}
+	return u, nil
+}
+
+func parseBaseURL(raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return nil, err
+	}
+	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		return nil, errors.New("must be an http or https URL with no query or credentials")
 	}
 	return u, nil
 }
@@ -223,7 +304,7 @@ func (r *Route) compile() error {
 	seen := map[string]bool{}
 	for _, s := range strings.Split(r.Path[1:], "/") {
 		if dottedRe.MatchString(s) {
-			return fmt.Errorf("parameter %s has a dot: params are bare, and this gateway fills nothing in", s)
+			return fmt.Errorf("parameter %s has a dot: params are bare", s)
 		}
 		if m := paramRe.FindStringSubmatch(s); m != nil {
 			if len(m[1]) > audit.MaxParamNameLen {
@@ -254,21 +335,14 @@ func (r *Route) compile() error {
 		return errors.New("methods: missing")
 	}
 	r.verbs = map[string]bool{}
-	for _, m := range r.Methods {
-		if !allowed[m.Verb] {
-			return fmt.Errorf("method %q not allowed", m.Verb)
+	for _, verb := range r.Methods {
+		if !allowed[verb] {
+			return fmt.Errorf("method %q not allowed", verb)
 		}
-		if _, dup := r.verbs[m.Verb]; dup {
-			return fmt.Errorf("method %s repeated", m.Verb)
+		if r.verbs[verb] {
+			return fmt.Errorf("method %s repeated", verb)
 		}
-		as := r.AsMember
-		if m.AsMember != nil {
-			as = *m.AsMember
-		}
-		if as && r.Node == "" {
-			return fmt.Errorf("%s: as_member needs node: the member is checked in the node's tree", m.Verb)
-		}
-		r.verbs[m.Verb] = as
+		r.verbs[verb] = true
 	}
 	return nil
 }
@@ -279,7 +353,7 @@ func overlaps(a, b *Route) bool {
 	}
 	shared := false
 	for m := range a.verbs {
-		if _, ok := b.verbs[m]; ok {
+		if b.verbs[m] {
 			shared = true
 			break
 		}
@@ -296,54 +370,167 @@ func overlaps(a, b *Route) bool {
 	return true
 }
 
-// Match is a matched request.
-type Match struct {
-	Route *Route
-	// Params are the path params by name.
-	Params map[string]string
-	// AsMember is whether the matched verb allows X-Plat5-As-Member.
-	AsMember bool
-}
-
-// Template is the matched path template.
-func (m *Match) Template() string {
-	return m.Route.Path
-}
-
-// NodeID is the route node's id, or "" when the route names none.
-func (m *Match) NodeID() string {
-	if m.Route.Node == "" {
-		return ""
+func (r *Route) match(method string, segs []string) (map[string]string, bool) {
+	if len(r.segments) != len(segs) || !r.verbs[method] {
+		return nil, false
 	}
-	return m.Params[m.Route.Node]
+	for i, s := range r.segments {
+		if s.param == "" && s.literal != segs[i] {
+			return nil, false
+		}
+	}
+	params := make(map[string]string, r.paramCount)
+	for i, s := range r.segments {
+		if s.param != "" {
+			params[s.param] = segs[i]
+		}
+	}
+	return params, true
 }
 
-// Match returns the route for this method and decoded path segments, or nil.
-func (t *Table) Match(method string, segs []string) *Match {
-	for _, r := range t.routes {
-		as, listed := r.verbs[method]
-		if len(r.segments) != len(segs) || !listed {
-			continue
+// Resolution is the resolved target and optional matched route metadata for a
+// /services/{service}/{upstream_path...} request.
+type Resolution struct {
+	Service      string
+	Target       *url.URL
+	Timeout      time.Duration
+	UpstreamPath string
+	// Route is the matched template (e.g. "/projects/{project_id}/tasks"), or "" for an unlisted path.
+	Route       string
+	Params      map[string]string
+	NodeID      string
+	Permissions []string
+}
+
+// Registry merges explicit operator.yml services, control-plane discovery, and built-in
+// core templates. Safe for concurrent reads and atomic config/snapshot updates.
+type Registry struct {
+	mu   sync.RWMutex
+	cfg  *Config
+	snap *ControlPlaneSnapshot
+}
+
+func NewRegistry(cfg *Config) *Registry {
+	return &Registry{cfg: cfg}
+}
+
+func (r *Registry) SetConfig(cfg *Config) {
+	r.mu.Lock()
+	r.cfg = cfg
+	r.mu.Unlock()
+}
+
+func (r *Registry) SetControlPlane(snap *ControlPlaneSnapshot) {
+	r.mu.Lock()
+	r.snap = snap
+	r.mu.Unlock()
+}
+
+func (r *Registry) Config() *Config {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.cfg
+}
+
+func (r *Registry) ServiceCount() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	seen := map[string]bool{}
+	for name, s := range r.cfg.Services {
+		if s.Target != nil {
+			seen[name] = true
 		}
-		ok := true
-		for i, s := range r.segments {
-			if s.param == "" && s.literal != segs[i] {
-				ok = false
-				break
+	}
+	if r.snap != nil {
+		for name, s := range r.snap.Services {
+			if s.Target != nil {
+				seen[name] = true
 			}
 		}
-		if !ok {
-			continue
-		}
-		params := make(map[string]string, r.paramCount)
-		for i, s := range r.segments {
-			if s.param != "" {
-				params[s.param] = segs[i]
+	}
+	return len(seen)
+}
+
+// Resolve parses /services/{service}/{upstream_path...} and resolves the target service
+// and optional route template. Returns (nil, nil) when the path does not address a known service.
+func (r *Registry) Resolve(method, escapedPath string) (*Resolution, error) {
+	segs, err := Segments(escapedPath)
+	if err != nil {
+		return nil, err
+	}
+	// Must be /services/{service}/{upstream_path...} (at least 3 segments).
+	if len(segs) < 3 || segs[0] != "services" {
+		return nil, nil
+	}
+	service := segs[1]
+	if !nameRe.MatchString(service) {
+		return nil, nil
+	}
+	// Preserve exact escaped upstream path by stripping "/services/{service}".
+	prefix := "/services/" + service
+	if !strings.HasPrefix(escapedPath, prefix+"/") {
+		return nil, nil
+	}
+	upstreamPath := escapedPath[len(prefix):]
+	upstreamSegs := segs[2:]
+
+	r.mu.RLock()
+	staticSvc := r.cfg.Services[service]
+	var cpSvc *DiscoveredService
+	if r.snap != nil {
+		cpSvc = r.snap.Services[service]
+	}
+	r.mu.RUnlock()
+
+	var target *url.URL
+	var timeout time.Duration
+	if staticSvc != nil && staticSvc.Target != nil {
+		target = staticSvc.Target
+	} else if cpSvc != nil && cpSvc.Target != nil {
+		target = cpSvc.Target
+	}
+	if target == nil {
+		return nil, nil
+	}
+	if staticSvc != nil && staticSvc.Timeout > 0 {
+		timeout = staticSvc.Timeout
+	} else if cpSvc != nil && cpSvc.Timeout > 0 {
+		timeout = cpSvc.Timeout
+	}
+
+	res := &Resolution{
+		Service:      service,
+		Target:       target,
+		Timeout:      timeout,
+		UpstreamPath: upstreamPath,
+		Params:       map[string]string{},
+	}
+
+	// Match templates in priority order: explicit operator.yml -> control-plane -> built-in core.
+	var groups [][]*Route
+	if staticSvc != nil && len(staticSvc.Routes) > 0 {
+		groups = append(groups, staticSvc.Routes)
+	}
+	if cpSvc != nil && len(cpSvc.Routes) > 0 {
+		groups = append(groups, cpSvc.Routes)
+	}
+	if bi, ok := builtinTemplates[service]; ok {
+		groups = append(groups, bi)
+	}
+	for _, list := range groups {
+		for _, rt := range list {
+			if params, ok := rt.match(method, upstreamSegs); ok {
+				res.Route = rt.Path
+				res.Params = params
+				if rt.Node != "" {
+					res.NodeID = params[rt.Node]
+				}
+				res.Permissions = rt.Permissions
+				return res, nil
 			}
 		}
-		return &Match{Route: r, Params: params, AsMember: as}
 	}
-	return nil
+	return res, nil
 }
 
 // ErrBadPath is a path this gateway could read differently from the service.

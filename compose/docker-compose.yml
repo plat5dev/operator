@@ -18,7 +18,7 @@ services:
       - "${OPERATOR_PORT:-5410}:5004"
       - "127.0.0.1:8004:8004"
     environment:
-      ROUTES_FILE: /etc/operator/routes.yml
+      CONFIG_FILE: /etc/operator/operator.yml
       IDENTITY_URL: http://identity:3000
       # Plat5 Auth as the operator IdP: the operator id is its user id, and the email is
       # in the token because operator-auth sets AUTH_TOKEN_EMAIL.
@@ -30,7 +30,7 @@ services:
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5412}
       AUDIT_URL: http://operator-audit:8005
     volumes:
-      - ./routes.yml:/etc/operator/routes.yml:ro
+      - ./operator.yml:/etc/operator/operator.yml:ro
     networks:
       - default
       - plat5
@@ -131,7 +131,7 @@ services:
       retries: 12
       start_period: 10s
 
-  # Answers with the request it received: what a service is sent (routes.yml's echo).
+  # Answers with the request it received: what a service is sent (operator.yml's echo).
   echo:
     image: traefik/whoami:v1.11
 

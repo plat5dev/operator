@@ -33,10 +33,11 @@ type Intent struct {
 	OccurredAt time.Time
 	Actor      Actor
 	ActingAs   *ActingAs
+	Reason     *string
 	// RootID is Nodes[0].ID, nil when Nodes is empty.
 	RootID *string
 	Nodes  []Node
-	// Service and Route are nil when no route matched. Path is set only then.
+	// Service is nil when no known service was addressed. Route is nil when no route template matched; Path is set only then.
 	Service   *string
 	Method    string
 	Route     *string
@@ -75,6 +76,7 @@ type Filter struct {
 	StartingAfter  string
 	OperatorID     string
 	ActingAsMember string
+	Reason         string
 	// NodeID matches events on the node or below it: whose chain contains it.
 	NodeID         string
 	Service        string

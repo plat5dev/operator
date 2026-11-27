@@ -87,6 +87,17 @@ func TestParseIntent(t *testing.T) {
 	if unmatched.Route != nil || *unmatched.Path != "/nope/a%2Fb" {
 		t.Fatalf("%+v", unmatched)
 	}
+
+	unlisted, err := ParseIntent("req2", intentJSON(t, map[string]any{
+		"acting_as": nil, "root_id": nil, "nodes": []any{}, "reason": "ZD-4821",
+		"service": "api", "route": nil, "params": map[string]any{}, "path": "/internal/debug",
+	}), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unlisted.Route != nil || *unlisted.Service != "api" || *unlisted.Path != "/internal/debug" || *unlisted.Reason != "ZD-4821" {
+		t.Fatalf("%+v", unlisted)
+	}
 }
 
 func TestParseIntentInvalid(t *testing.T) {
@@ -108,7 +119,9 @@ func TestParseIntentInvalid(t *testing.T) {
 		{"route without slash", "r", map[string]any{"route": "nodes"}, "route"},
 		{"route and path", "r", map[string]any{"path": "/nodes/01jbxa5m7n9p1q3r5s7t9v1w3x"}, "path"},
 		{"neither route nor path", "r", map[string]any{"route": nil}, "route"},
-		{"path with service", "r", map[string]any{"route": nil, "params": map[string]any{}, "nodes": []any{}, "root_id": nil, "acting_as": nil, "path": "/x"}, "service"},
+		{"path with bad service", "r", map[string]any{"route": nil, "service": "BadService", "params": map[string]any{}, "nodes": []any{}, "root_id": nil, "acting_as": nil, "path": "/x"}, "service"},
+		{"empty reason", "r", map[string]any{"reason": ""}, "reason"},
+		{"reason too long", "r", map[string]any{"reason": strings.Repeat("a", maxReasonChars+1)}, "reason"},
 		{"path with params", "r", map[string]any{"route": nil, "service": nil, "path": "/x"}, "params"},
 		{"path with nodes", "r", map[string]any{"route": nil, "service": nil, "params": map[string]any{}, "path": "/x"}, "nodes"},
 		{"param name", "r", map[string]any{"params": map[string]any{"Org": "x"}}, "params.Org"},
@@ -170,7 +183,7 @@ func TestParseOutcome(t *testing.T) {
 		`{"outcome":"rejected","status":404,"response_bytes":0,"created_id":"01jbxa5m7n9p1q3r5s7t9v1w3x"}`: "created_id",
 		`{"outcome":"responded","status":201,"response_bytes":0,"created_id":"a/b"}`:                       "created_id",
 		`{"outcome":"responded","status":201,"response_bytes":0,"created_id":""}`:                          "created_id",
-		`{"outcome":"rejected","status":404,"response_bytes":0,"details":{"a":1}}`:                         "details",
+		`{"outcome":"no_response","status":502,"response_bytes":0,"details":{"a":1}}`:                      "details",
 		`{"outcome":"responded","status":200,"response_bytes":0,"details":[1]}`:                            "details",
 		`{"outcome":"responded","status":200,"response_bytes":0,"details":{"a":"\u0000"}}`:                 "details",
 	}

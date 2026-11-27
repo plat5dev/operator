@@ -50,7 +50,9 @@ type Config struct {
 	// EmailClaim is a dotted path to the operator's email. Default "email". Optional
 	// in the token: absent, the operator has no email.
 	EmailClaim string
-	Client     *http.Client
+	// PolicyClaims are dotted JWT claim paths extracted onto Operator.Claims for AuthZEN.
+	PolicyClaims []string
+	Client       *http.Client
 }
 
 type Operator struct {
@@ -59,12 +61,15 @@ type Operator struct {
 	Issuer string
 	// ClientID is the client the token was issued to: azp, else client_id. Empty when neither.
 	ClientID string
+	// Claims are the configured policy_claims present in the token.
+	Claims map[string]any
 }
 
 type Verifier struct {
-	cfg Config
-	log *slog.Logger
-	now func() time.Time
+	cfg          Config
+	log          *slog.Logger
+	now          func() time.Time
+	policyClaims atomic.Pointer[[]string]
 
 	ready atomic.Bool
 
@@ -85,7 +90,15 @@ func New(cfg Config, log *slog.Logger) *Verifier {
 	if cfg.Client == nil {
 		cfg.Client = &http.Client{Transport: httpx.NewTransport(0), Timeout: 10 * time.Second}
 	}
-	return &Verifier{cfg: cfg, log: log, now: time.Now}
+	v := &Verifier{cfg: cfg, log: log, now: time.Now}
+	v.SetPolicyClaims(cfg.PolicyClaims)
+	return v
+}
+
+// SetPolicyClaims atomically replaces the JWT claim paths forwarded to AuthZEN.
+func (v *Verifier) SetPolicyClaims(paths []string) {
+	cp := append([]string(nil), paths...)
+	v.policyClaims.Store(&cp)
 }
 
 // Ready reports whether JWKS has been fetched at least once.
@@ -258,7 +271,39 @@ func (v *Verifier) Verify(ctx context.Context, header string) (*Operator, error)
 	if client == "" {
 		client, _ = all["client_id"].(string)
 	}
-	return &Operator{ID: id, Email: email, Issuer: reg.Issuer, ClientID: client}, nil
+	return &Operator{ID: id, Email: email, Issuer: reg.Issuer, ClientID: client, Claims: extractPolicyClaims(all, v.policyClaims.Load())}, nil
+}
+
+func extractPolicyClaims(all map[string]any, paths *[]string) map[string]any {
+	if paths == nil || len(*paths) == 0 {
+		return nil
+	}
+	var out map[string]any
+	for _, path := range *paths {
+		if val, ok := claimOK(all, path); ok {
+			if out == nil {
+				out = make(map[string]any, len(*paths))
+			}
+			out[path] = val
+		}
+	}
+	return out
+}
+
+func claimOK(claims map[string]any, path string) (any, bool) {
+	var cur any = claims
+	for _, part := range strings.Split(path, ".") {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		v, ok := m[part]
+		if !ok {
+			return nil, false
+		}
+		cur = v
+	}
+	return cur, true
 }
 
 func claim(claims map[string]any, path string) any {

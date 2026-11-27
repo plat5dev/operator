@@ -103,6 +103,7 @@ type eventResponse struct {
 	RequestID     string            `json:"request_id"`
 	Actor         Actor             `json:"actor"`
 	ActingAs      *ActingAs         `json:"acting_as"`
+	Reason        *string           `json:"reason"`
 	RootID        *string           `json:"root_id"`
 	Nodes         []Node            `json:"nodes"`
 	Service       *string           `json:"service"`
@@ -134,6 +135,7 @@ func toResponse(e *Event) eventResponse {
 		RequestID:     e.RequestID,
 		Actor:         e.Actor,
 		ActingAs:      e.ActingAs,
+		Reason:        e.Reason,
 		RootID:        e.RootID,
 		Nodes:         nodes,
 		Service:       e.Service,

@@ -55,6 +55,19 @@ func InvalidRequest(w http.ResponseWriter, r *http.Request) {
 	write(w, r, http.StatusBadRequest, "invalid_request_error", "INVALID_REQUEST", "Malformed request.", nil)
 }
 
+// Forbidden is an AuthZEN policy denial. reason is optional PDP context.reason.
+func Forbidden(w http.ResponseWriter, r *http.Request, reason string) {
+	var details any
+	if reason != "" {
+		details = map[string]string{"reason": reason}
+	}
+	write(w, r, http.StatusForbidden, "invalid_request_error", "FORBIDDEN", "Permission denied.", details)
+}
+
+func PayloadTooLarge(w http.ResponseWriter, r *http.Request) {
+	write(w, r, http.StatusRequestEntityTooLarge, "invalid_request_error", "PAYLOAD_TOO_LARGE", "Request body too large.", nil)
+}
+
 func NotFound(w http.ResponseWriter, r *http.Request) {
 	write(w, r, http.StatusNotFound, "invalid_request_error", "NOT_FOUND", "Resource not found.", nil)
 }

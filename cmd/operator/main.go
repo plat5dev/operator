@@ -5,17 +5,20 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/plat5dev/operator/internal/audit"
 	"github.com/plat5dev/operator/internal/auth"
+	"github.com/plat5dev/operator/internal/authorizer"
 	"github.com/plat5dev/operator/internal/gateway"
 	"github.com/plat5dev/operator/internal/httpx"
 	"github.com/plat5dev/operator/internal/identity"
@@ -31,44 +34,79 @@ func main() {
 	}
 }
 
+func buildAuthorizer(cfg routes.AuthorizerConfig, reg *metrics.Registry, getenv func(string) string) (gateway.Authorizer, error) {
+	if cfg.Mode == routes.AuthorizerModeDisabled {
+		return nil, nil
+	}
+	var token string
+	if cfg.TokenEnv != "" {
+		token = strings.TrimSpace(getenv(cfg.TokenEnv))
+		if token == "" {
+			return nil, fmt.Errorf("authorizer.token_env: environment variable %s is unset or empty", cfg.TokenEnv)
+		}
+	}
+	return authorizer.New(authorizer.Config{
+		URL:     cfg.URL,
+		Timeout: cfg.Timeout,
+		Token:   token,
+		Metrics: reg,
+	}), nil
+}
+
 func run(log *slog.Logger) error {
 	cfg, err := loadConfig(os.Getenv)
 	if err != nil {
 		return err
 	}
-	table, err := routes.Load(cfg.RoutesFile)
+	fileCfg, err := routes.Load(cfg.ConfigFile, cfg.overrides())
 	if err != nil {
 		return err
 	}
-	if table.HasNodes() && cfg.IdentityURL == "" {
-		return errors.New("IDENTITY_URL is required: routes in " + cfg.RoutesFile + " name nodes")
+
+	reg := metrics.NewRegistry()
+	authzClient, err := buildAuthorizer(fileCfg.Authorizer, reg, os.Getenv)
+	if err != nil {
+		return err
+	}
+
+	identityURL := cfg.IdentityURL
+	if identityURL == "" {
+		identityURL = fileCfg.IdentityURL()
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	verifier := auth.New(auth.Config{
-		Issuer:     cfg.Issuer,
-		JWKSURI:    cfg.JWKSURI,
-		Audiences:  cfg.Audiences,
-		IDClaim:    cfg.IDClaim,
-		EmailClaim: cfg.EmailClaim,
+		Issuer:       cfg.Issuer,
+		JWKSURI:      cfg.JWKSURI,
+		Audiences:    cfg.Audiences,
+		IDClaim:      cfg.IDClaim,
+		EmailClaim:   cfg.EmailClaim,
+		PolicyClaims: fileCfg.PolicyClaims,
 	}, log)
 	go verifier.Run(ctx)
 
-	reg := metrics.NewRegistry()
+	registry := routes.NewRegistry(fileCfg)
+	if fileCfg.ControlPlaneURL != "" {
+		poller := routes.NewControlPlanePoller(fileCfg.ControlPlaneURL, nil, log, registry.SetControlPlane)
+		go poller.Run(ctx)
+	}
+
 	gwCfg := gateway.Config{
-		Routes:          table,
+		Registry:        registry,
 		Auth:            verifier,
+		Authorizer:      authzClient,
 		AllowedOrigins:  cfg.AllowedOrigins,
+		TrustedProxies:  cfg.TrustedProxies,
 		UpstreamTimeout: cfg.UpstreamTimeout,
 		Signer:          cfg.Signer,
 		Metrics:         reg,
 		Log:             log,
 	}
 	var auditWriter *audit.Writer
-	if cfg.IdentityURL != "" {
-		gwCfg.Identity = identity.New(cfg.IdentityURL, nil)
+	if identityURL != "" {
+		gwCfg.Identity = identity.New(identityURL, nil)
 	}
 	if cfg.AuditURL != "" {
 		auditWriter = audit.New(audit.Config{URL: cfg.AuditURL, Log: log, Metrics: reg})
@@ -80,14 +118,18 @@ func run(log *slog.Logger) error {
 	reload := func() (int, error) {
 		reloadMu.Lock()
 		defer reloadMu.Unlock()
-		next, err := routes.Load(cfg.RoutesFile)
+		next, err := routes.Load(cfg.ConfigFile, cfg.overrides())
 		if err != nil {
 			return 0, err
 		}
-		if err := gw.Reload(next); err != nil {
+		nextAuthz, err := buildAuthorizer(next.Authorizer, reg, os.Getenv)
+		if err != nil {
 			return 0, err
 		}
-		return next.Len(), nil
+		registry.SetConfig(next)
+		verifier.SetPolicyClaims(next.PolicyClaims)
+		gw.SetAuthorizer(nextAuthz)
+		return registry.ServiceCount(), nil
 	}
 
 	hup := make(chan os.Signal, 1)
@@ -101,9 +143,9 @@ func run(log *slog.Logger) error {
 			case <-hup:
 				n, err := reload()
 				if err != nil {
-					log.Error("routes reload failed; keeping previous routes", "file", cfg.RoutesFile, "err", err)
+					log.Error("config reload failed; keeping previous config", "file", cfg.ConfigFile, "err", err)
 				} else {
-					log.Info("routes reloaded", "file", cfg.RoutesFile, "routes", n)
+					log.Info("config reloaded", "file", cfg.ConfigFile, "services", n)
 				}
 			}
 		}
@@ -122,8 +164,13 @@ func run(log *slog.Logger) error {
 		IdleTimeout:       60 * time.Second,
 	}
 
-	log.Info("starting", "addr", cfg.Addr, "internal_port", cfg.InternalPort, "routes", table.Len(),
-		"issuer", cfg.Issuer, "identity", cfg.IdentityURL)
+	log.Info("starting", "addr", cfg.Addr, "internal_port", cfg.InternalPort, "services", registry.ServiceCount(),
+		"issuer", cfg.Issuer, "identity", identityURL, "control_plane", fileCfg.ControlPlaneURL)
+	if authzClient != nil {
+		log.Info("authorizer: authzen", "url", fileCfg.Authorizer.URL)
+	} else {
+		log.Warn("authorizer: disabled")
+	}
 	if cfg.Signer != nil {
 		log.Info("upstream request signing: on", "kid", cfg.Signer.KID())
 	}
@@ -150,7 +197,6 @@ func run(log *slog.Logger) error {
 	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = api.Shutdown(shutdown)
-	// No more requests, so no more outcomes. Send what is queued (docs/concepts/audit.md#delivery).
 	if auditWriter != nil {
 		drain, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -164,8 +210,6 @@ func run(log *slog.Logger) error {
 	return err
 }
 
-// internalRoutes serves /health/live, /health/ready, /metrics, and POST /reload.
-// Ready means routes loaded and JWKS fetched once. It does not probe operator-audit.
 func internalRoutes(v *auth.Verifier, reg *metrics.Registry, reload func() (int, error), log *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /metrics", reg)
@@ -182,16 +226,16 @@ func internalRoutes(v *auth.Verifier, reg *metrics.Registry, reload func() (int,
 	mux.HandleFunc("POST /reload", func(w http.ResponseWriter, _ *http.Request) {
 		n, err := reload()
 		if err != nil {
-			log.Error("routes reload failed; keeping previous routes", "err", err)
+			log.Error("config reload failed; keeping previous config", "err", err)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnprocessableEntity)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
 		}
-		log.Info("routes reloaded", "routes", n)
+		log.Info("config reloaded", "services", n)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]any{"status": "reloaded", "routes": n})
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "reloaded", "services": n})
 	})
 	return mux
 }

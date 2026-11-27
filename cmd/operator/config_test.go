@@ -27,8 +27,8 @@ func TestConfigDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Addr != ":5004" || c.InternalPort != "8004" || c.RoutesFile != "routes.yml" || c.IDClaim != "sub" ||
-		c.UpstreamTimeout != 30*time.Second || len(c.AllowedOrigins) != 0 {
+	if c.Addr != ":5004" || c.InternalPort != "8004" || c.ConfigFile != "operator.yml" || c.IDClaim != "sub" ||
+		c.UpstreamTimeout != 30*time.Second || len(c.AllowedOrigins) != 0 || len(c.TrustedProxies) != 0 {
 		t.Fatalf("%+v", c)
 	}
 	if strings.Join(c.Audiences, "|") != "operator-cli|operator-console" {
@@ -42,8 +42,13 @@ func TestConfigDefaults(t *testing.T) {
 	}
 	m := base()
 	m["IDENTITY_URL"] = "http://identity:3000/"
-	if c, err := loadConfig(env(m)); err != nil || c.IdentityURL != "http://identity:3000" {
-		t.Fatalf("identity = %q, %v", c.IdentityURL, err)
+	m["CONTROL_PLANE_URL"] = "http://control-plane:5003/"
+	m["AUTHORIZER_MODE"] = "disabled"
+	m["TRUSTED_PROXIES"] = "10.0.0.0/8, 127.0.0.1"
+	c, err = loadConfig(env(m))
+	if err != nil || c.IdentityURL != "http://identity:3000" || c.ControlPlaneURL != "http://control-plane:5003" ||
+		c.AuthorizerMode != "disabled" || len(c.TrustedProxies) != 2 {
+		t.Fatalf("overrides = %+v, %v", c, err)
 	}
 }
 
@@ -78,20 +83,21 @@ func TestConfigOrigins(t *testing.T) {
 
 func TestConfigErrors(t *testing.T) {
 	cases := map[string]map[string]string{
-		"no issuer":        {"AUTH_ISSUER": ""},
-		"no jwks":          {"AUTH_JWKS_URI": ""},
-		"bad jwks":         {"AUTH_JWKS_URI": "dex/keys"},
-		"no audience":      {"AUTH_ALLOWED_AUDIENCES": " , "},
-		"wildcard origin":  {"ALLOWED_ORIGINS": "*"},
-		"origin path":      {"ALLOWED_ORIGINS": "https://a.test/app"},
-		"bad port":         {"INTERNAL_PORT": "http"},
-		"bad timeout":      {"UPSTREAM_TIMEOUT": "0s"},
-		"bad identity url": {"IDENTITY_URL": "identity:3000"},
-		"no audit url":     {"AUDIT_URL": ""},
-		"bad audit url":    {"AUDIT_URL": "operator-audit:8005"},
-		"audit enabled no": {"AUDIT_ENABLED": "no"},
-		"orphan kid":       {"UPSTREAM_SIGNING_KEY_ID": "k-1"},
-		"bad signing key":  {"UPSTREAM_SIGNING_KEY": "not-valid"},
+		"no issuer":           {"AUTH_ISSUER": ""},
+		"no jwks":             {"AUTH_JWKS_URI": ""},
+		"bad jwks":            {"AUTH_JWKS_URI": "dex/keys"},
+		"no audience":         {"AUTH_ALLOWED_AUDIENCES": " , "},
+		"wildcard origin":     {"ALLOWED_ORIGINS": "*"},
+		"origin path":         {"ALLOWED_ORIGINS": "https://a.test/app"},
+		"bad trusted proxies": {"TRUSTED_PROXIES": "not-an-ip"},
+		"bad port":            {"INTERNAL_PORT": "http"},
+		"bad timeout":         {"UPSTREAM_TIMEOUT": "0s"},
+		"bad identity url":    {"IDENTITY_URL": "identity:3000"},
+		"no audit url":        {"AUDIT_URL": ""},
+		"bad audit url":       {"AUDIT_URL": "operator-audit:8005"},
+		"audit enabled no":    {"AUDIT_ENABLED": "no"},
+		"orphan kid":          {"UPSTREAM_SIGNING_KEY_ID": "k-1"},
+		"bad signing key":     {"UPSTREAM_SIGNING_KEY": "not-valid"},
 		"bad signing kid": {
 			"UPSTREAM_SIGNING_KEY":    base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{3}, ed25519.SeedSize)),
 			"UPSTREAM_SIGNING_KEY_ID": "bad kid",

@@ -1,0 +1,20 @@
+# Dev operator config: core Plat5 services, control-plane discovery, and echo.
+control_plane:
+  url: http://control-plane:5003
+
+services:
+  identity:
+    url: http://identity:3000
+  audit:
+    url: http://audit:3002
+  operator-audit:
+    url: http://operator-audit:5005
+  echo:
+    url: http://echo:80
+    routes:
+      - path: /nodes/{node_id}/echo
+        node: node_id
+        methods: [GET, POST]
+
+authorizer:
+  mode: disabled

@@ -45,11 +45,11 @@ LABEL org.opencontainers.image.title="operator" \
       org.opencontainers.image.description="Plat5 headless operator gateway"
 
 COPY --from=builder /out/operator /usr/local/bin/operator
-COPY routes.yml /routes.yml
+COPY operator.yml /operator.yml
 
 ENV ADDR=:5004
 ENV INTERNAL_PORT=8004
-ENV ROUTES_FILE=/routes.yml
+ENV CONFIG_FILE=/operator.yml
 EXPOSE 5004 8004
 USER 10001:65534
 ENTRYPOINT ["/usr/local/bin/operator"]

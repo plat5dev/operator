@@ -54,16 +54,19 @@ func (f fakeAuth) Verify(_ context.Context, header string) (*auth.Operator, erro
 	case "":
 		return nil, auth.ErrMissing
 	case "Bearer good":
-		return &auth.Operator{ID: "op_1", Email: "a@x.test", Issuer: "https://idp.test", ClientID: "operator-console"}, nil
+		return &auth.Operator{
+			ID:       "op_1",
+			Email:    "a@x.test",
+			Issuer:   "https://idp.test",
+			ClientID: "operator-console",
+			Claims:   map[string]any{"groups": []string{"sre"}},
+		}, nil
 	case "Bearer old":
 		return nil, auth.ErrExpired
 	}
 	return nil, auth.ErrInvalid
 }
 
-// fakeIdentity is a tree: orgID, projectID under it, costCenterID under that. downNodeID
-// is identity failing. Members of orgID: danaID (person), ciID (service account),
-// goneMemberID (removed).
 type fakeIdentity struct{}
 
 var tree = map[string]identity.Node{
@@ -154,26 +157,18 @@ func setup(t *testing.T, upstreamURL string, a Authenticator, timeout time.Durat
 
 func setupWith(t *testing.T, upstreamURL string, a Authenticator, timeout time.Duration, aw AuditWriter, reg *metrics.Registry) (http.Handler, *bytes.Buffer) {
 	t.Helper()
-	tab, err := routes.Parse([]byte(`
+	return setupFull(t, upstreamURL, a, nil, timeout, aw, reg)
+}
+
+func setupFull(t *testing.T, upstreamURL string, a Authenticator, authz Authorizer, timeout time.Duration, aw AuditWriter, reg *metrics.Registry) (*Gateway, *bytes.Buffer) {
+	t.Helper()
+	cfg, err := routes.Parse([]byte(`
 services:
   identity:
-    url: ` + upstreamURL + `
-    routes:
-      - path: /nodes
-        methods: [GET]
-      - path: /nodes/{node_id}
-        node: node_id
-        methods: [GET, PATCH]
-      - path: /nodes/{root_id}/members
-        node: root_id
-        methods: [GET, POST]
-      - path: /nodes/{node_id}/children/{kind}
-        node: node_id
-        as_member: true
-        methods: [GET, POST]
-      - path: /users/{user_id}
-        methods: [GET]
-`))
+    url: `+upstreamURL+`
+authorizer:
+  mode: disabled
+`), routes.Overrides{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,9 +177,10 @@ services:
 		timeout = 5 * time.Second
 	}
 	g := New(Config{
-		Routes:          tab,
+		Registry:        routes.NewRegistry(cfg),
 		Auth:            a,
 		Identity:        fakeIdentity{},
+		Authorizer:      authz,
 		AllowedOrigins:  []string{"https://console.test"},
 		UpstreamTimeout: timeout,
 		Audit:           aw,
@@ -237,30 +233,31 @@ func TestRejections(t *testing.T) {
 		status             int
 		code, reason       string
 	}{
-		{"missing token", "GET", "/nodes", nil, 401, "UNAUTHORIZED", "missing"},
-		{"bad token", "GET", "/nodes", map[string]string{"Authorization": "Bearer bad"}, 401, "UNAUTHORIZED", "invalid"},
-		{"expired", "GET", "/nodes", map[string]string{"Authorization": "Bearer old"}, 401, "UNAUTHORIZED", "expired"},
+		{"missing token", "GET", "/services/identity/nodes", nil, 401, "UNAUTHORIZED", "missing"},
+		{"bad token", "GET", "/services/identity/nodes", map[string]string{"Authorization": "Bearer bad"}, 401, "UNAUTHORIZED", "invalid"},
+		{"expired", "GET", "/services/identity/nodes", map[string]string{"Authorization": "Bearer old"}, 401, "UNAUTHORIZED", "expired"},
 		{"401 before 404", "GET", "/nope", nil, 401, "UNAUTHORIZED", "missing"},
 		{"401 before 400", "GET", "/a/../nodes", nil, 401, "UNAUTHORIZED", "missing"},
-		{"401 before node lookup", "GET", "/nodes/" + missingNodeID, nil, 401, "UNAUTHORIZED", "missing"},
-		{"dot segment", "GET", "/nodes/x/../" + orgID + "/members", good, 400, "INVALID_REQUEST", ""},
-		{"encoded slash", "GET", "/nodes/a%2Fb/members", good, 400, "INVALID_REQUEST", ""},
-		{"double slash", "GET", "//nodes", good, 400, "INVALID_REQUEST", ""},
-		{"trailing slash", "GET", "/nodes/", good, 400, "INVALID_REQUEST", ""},
-		{"no route", "GET", "/users/" + userID + "/memberships", good, 404, "NOT_FOUND", ""},
-		{"root", "GET", "/", good, 404, "NOT_FOUND", ""},
-		{"method not listed", "DELETE", "/nodes", good, 404, "NOT_FOUND", ""},
-		{"options without preflight", "OPTIONS", "/nodes", good, 404, "NOT_FOUND", ""},
-		{"as header on a route without as_member", "GET", "/nodes/" + orgID, map[string]string{"Authorization": "Bearer good", asMemberHeader: danaID}, 400, "INVALID_REQUEST", ""},
-		{"as header on a route without node", "GET", "/nodes", map[string]string{"Authorization": "Bearer good", asMemberHeader: danaID}, 400, "INVALID_REQUEST", ""},
-		{"as header empty", "POST", "/nodes/" + orgID + "/children/project", map[string]string{"Authorization": "Bearer good", asMemberHeader: "  "}, 400, "INVALID_REQUEST", ""},
-		{"as header malformed slash", "POST", "/nodes/" + orgID + "/children/project", map[string]string{"Authorization": "Bearer good", asMemberHeader: "a/b"}, 400, "INVALID_REQUEST", ""},
-		{"as header on unmatched route is 404", "GET", "/nope", map[string]string{"Authorization": "Bearer good", asMemberHeader: danaID}, 404, "NOT_FOUND", ""},
-		{"node not found", "GET", "/nodes/" + missingNodeID, good, 404, "NOT_FOUND", ""},
-		{"member removed", "POST", "/nodes/" + orgID + "/children/project", map[string]string{"Authorization": "Bearer good", asMemberHeader: goneMemberID}, 400, "INVALID_REQUEST", ""},
-		{"member of no tree", "POST", "/nodes/" + projectID + "/children/env", map[string]string{"Authorization": "Bearer good", asMemberHeader: nobodyID}, 400, "INVALID_REQUEST", ""},
-		{"identity down for the node", "GET", "/nodes/" + downNodeID, good, 503, "SERVICE_UNAVAILABLE", ""},
-		{"identity down for the member", "GET", "/nodes/" + orgID + "/children/project", map[string]string{"Authorization": "Bearer good", asMemberHeader: downMemberID}, 503, "SERVICE_UNAVAILABLE", ""},
+		{"401 before node lookup", "GET", "/services/identity/nodes/" + missingNodeID, nil, 401, "UNAUTHORIZED", "missing"},
+		{"dot segment", "GET", "/services/identity/nodes/x/../" + orgID + "/members", good, 400, "INVALID_REQUEST", ""},
+		{"encoded slash", "GET", "/services/identity/nodes/a%2Fb/members", good, 400, "INVALID_REQUEST", ""},
+		{"double slash", "GET", "//services/identity/nodes", good, 400, "INVALID_REQUEST", ""},
+		{"trailing slash", "GET", "/services/identity/nodes/", good, 400, "INVALID_REQUEST", ""},
+		{"flat path 404", "GET", "/nodes", good, 404, "NOT_FOUND", ""},
+		{"unknown service 404", "GET", "/services/unknown/ping", good, 404, "NOT_FOUND", ""},
+		{"root 404", "GET", "/", good, 404, "NOT_FOUND", ""},
+		{"service without subpath 404", "GET", "/services/identity", good, 404, "NOT_FOUND", ""},
+		{"as header on unscoped route", "GET", "/services/identity/nodes", map[string]string{"Authorization": "Bearer good", asMemberHeader: danaID}, 400, "INVALID_REQUEST", ""},
+		{"as header empty", "POST", "/services/identity/nodes/" + orgID + "/children/project", map[string]string{"Authorization": "Bearer good", asMemberHeader: "  "}, 400, "INVALID_REQUEST", ""},
+		{"as header malformed slash", "POST", "/services/identity/nodes/" + orgID + "/children/project", map[string]string{"Authorization": "Bearer good", asMemberHeader: "a/b"}, 400, "INVALID_REQUEST", ""},
+		{"reason empty", "GET", "/services/identity/nodes", map[string]string{"Authorization": "Bearer good", reasonHeader: "   "}, 400, "INVALID_REQUEST", ""},
+		{"reason control char", "GET", "/services/identity/nodes", map[string]string{"Authorization": "Bearer good", reasonHeader: "ZD\x07-1"}, 400, "INVALID_REQUEST", ""},
+		{"as header on unknown service is 404", "GET", "/nope", map[string]string{"Authorization": "Bearer good", asMemberHeader: danaID}, 404, "NOT_FOUND", ""},
+		{"node not found", "GET", "/services/identity/nodes/" + missingNodeID, good, 404, "NOT_FOUND", ""},
+		{"member removed", "POST", "/services/identity/nodes/" + orgID + "/children/project", map[string]string{"Authorization": "Bearer good", asMemberHeader: goneMemberID}, 400, "INVALID_REQUEST", ""},
+		{"member of no tree", "POST", "/services/identity/nodes/" + projectID + "/children/env", map[string]string{"Authorization": "Bearer good", asMemberHeader: nobodyID}, 400, "INVALID_REQUEST", ""},
+		{"identity down for the node", "GET", "/services/identity/nodes/" + downNodeID, good, 503, "SERVICE_UNAVAILABLE", ""},
+		{"identity down for the member", "GET", "/services/identity/nodes/" + orgID + "/children/project", map[string]string{"Authorization": "Bearer good", asMemberHeader: downMemberID}, 503, "SERVICE_UNAVAILABLE", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -293,7 +290,7 @@ func TestRejections(t *testing.T) {
 
 func TestNoKeysIs503(t *testing.T) {
 	h, _ := setup(t, "http://127.0.0.1:1", fakeAuth{err: auth.ErrNoKeys}, 0)
-	w := do(h, "GET", "/nodes", map[string]string{"Authorization": "Bearer good"})
+	w := do(h, "GET", "/services/identity/nodes", map[string]string{"Authorization": "Bearer good"})
 	if w.Code != 503 || decode(t, w).Error.Code != "SERVICE_UNAVAILABLE" {
 		t.Fatalf("status = %d", w.Code)
 	}
@@ -311,7 +308,7 @@ func TestForward(t *testing.T) {
 		_, _ = io.WriteString(w, `{"ok":true}`)
 	})
 	h, logs := setup(t, up.srv.URL, fakeAuth{}, 0)
-	w := do(h, "PATCH", "/nodes/%30"+projectID[1:]+"?limit=5&x=%2F", map[string]string{
+	w := do(h, "PATCH", "/services/identity/nodes/%30"+projectID[1:]+"?limit=5&x=%2F", map[string]string{
 		"Authorization":       "Bearer good",
 		"Cookie":              "session=abc",
 		"X-API-Key":           "key",
@@ -321,6 +318,7 @@ func TestForward(t *testing.T) {
 		"X-Plat5-Operator-Id": "op_forged",
 		"X-Plat5-Project-Id":  forgedNodeID,
 		"X-Plat5-Anything":    "x",
+		reasonHeader:          "INC-412",
 		"traceparent":         "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
 	})
 
@@ -358,9 +356,9 @@ func TestForward(t *testing.T) {
 	if s.Body != `{"a":1}` {
 		t.Fatalf("upstream body = %q", s.Body)
 	}
-	for _, h := range []string{"Authorization", "Cookie", "X-API-Key"} {
-		if s.Header.Get(h) != "" {
-			t.Fatalf("%s reached the upstream", h)
+	for _, hdr := range []string{"Authorization", "Cookie", "X-API-Key", reasonHeader} {
+		if s.Header.Get(hdr) != "" {
+			t.Fatalf("%s reached the upstream", hdr)
 		}
 	}
 	if s.Header.Get("X-Request-ID") != id {
@@ -369,7 +367,6 @@ func TestForward(t *testing.T) {
 	if s.Header.Get("traceparent") == "" {
 		t.Fatal("traceparent dropped")
 	}
-	// The chain and the operator, as this gateway set them. Nothing a client sent.
 	wantPlat5 := map[string]string{
 		"X-Plat5-Organization-Id": orgID,
 		"X-Plat5-Project-Id":      projectID,
@@ -381,22 +378,15 @@ func TestForward(t *testing.T) {
 	want := map[string]any{
 		"msg": "request", "request_id": id, "method": "PATCH", "status": float64(418),
 		"operator_id": "op_1", "operator_email": "a@x.test", "service": "identity", "route": "/nodes/{node_id}",
-		"root_id": orgID, "node_id": projectID,
+		"root_id": orgID, "node_id": projectID, "reason": "INC-412",
 	}
 	for k, v := range want {
 		if line[k] != v {
 			t.Errorf("log %s = %v, want %v", k, line[k], v)
 		}
 	}
-	if line["member_id"] != nil {
-		t.Errorf("log member_id = %v", line["member_id"])
-	}
-	if p, _ := line["params"].(map[string]any); p["node_id"] != projectID {
-		t.Errorf("log params = %v", line["params"])
-	}
 }
 
-// checkPlat5 fails unless the X-Plat5-* headers are exactly want, one value each.
 func checkPlat5(t *testing.T, h http.Header, want map[string]string) {
 	t.Helper()
 	for k, v := range h {
@@ -429,7 +419,7 @@ func TestActingAsMember(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			up := newUpstream(t, nil)
 			h, logs := setup(t, up.srv.URL, fakeAuth{}, 0)
-			w := do(h, "POST", c.path+"?q=1", map[string]string{
+			w := do(h, "POST", "/services/identity"+c.path+"?q=1", map[string]string{
 				"Authorization":     "Bearer good",
 				asMemberHeader:      c.member,
 				"X-Plat5-Member-Id": forgedMemberID,
@@ -450,10 +440,9 @@ func TestActingAsMember(t *testing.T) {
 		})
 	}
 
-	// Repeated X-Plat5-As-Member header is rejected with 400.
 	up := newUpstream(t, nil)
 	h, _ := setup(t, up.srv.URL, fakeAuth{}, 0)
-	r := httptest.NewRequest("POST", "/nodes/"+orgID+"/children/project", nil)
+	r := httptest.NewRequest("POST", "/services/identity/nodes/"+orgID+"/children/project", nil)
 	r.Header.Set("Authorization", "Bearer good")
 	r.Header.Add(asMemberHeader, danaID)
 	r.Header.Add(asMemberHeader, ciID)
@@ -463,15 +452,27 @@ func TestActingAsMember(t *testing.T) {
 		t.Fatalf("repeated header: status %d, body %s, seen %v", w.Code, w.Body, up.seen())
 	}
 
-	// Without X-Plat5-As-Member, the same route sends no member and no principal.
-	do(h, "GET", "/nodes/"+orgID+"/children/project", map[string]string{"Authorization": "Bearer good"})
+	do(h, "GET", "/services/identity/nodes/"+orgID+"/children/project", map[string]string{"Authorization": "Bearer good"})
 	checkPlat5(t, up.seen().Header, map[string]string{"X-Plat5-Organization-Id": orgID, "X-Plat5-Operator-Id": "op_1"})
+}
+
+func TestUnlistedServicePathForwardsUnscoped(t *testing.T) {
+	up := newUpstream(t, nil)
+	h, _ := setup(t, up.srv.URL, fakeAuth{}, 0)
+	w := do(h, "GET", "/services/identity/custom/debug", map[string]string{"Authorization": "Bearer good"})
+	if w.Code != http.StatusTeapot {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body)
+	}
+	if up.seen().Path != "/custom/debug" {
+		t.Fatalf("upstream path = %q", up.seen().Path)
+	}
+	checkPlat5(t, up.seen().Header, map[string]string{"X-Plat5-Operator-Id": "op_1"})
 }
 
 func TestNoNodeNoChain(t *testing.T) {
 	up := newUpstream(t, nil)
 	h, logs := setup(t, up.srv.URL, fakeAuth{}, 0)
-	do(h, "GET", "/users/"+userID, map[string]string{"Authorization": "Bearer good"})
+	do(h, "GET", "/services/identity/users/"+userID, map[string]string{"Authorization": "Bearer good"})
 	checkPlat5(t, up.seen().Header, map[string]string{"X-Plat5-Operator-Id": "op_1"})
 	if line := lastLog(t, logs); line["root_id"] != nil || line["node_id"] != nil {
 		t.Fatalf("log = %v", line)
@@ -486,18 +487,8 @@ func TestParseAsMember(t *testing.T) {
 		t.Fatalf("valid = %q, %v", got, err)
 	}
 	for _, bad := range [][]string{
-		{""},
-		{"   "},
-		{"."},
-		{".."},
-		{"a/b"},
-		{`a\b`},
-		{"a?b"},
-		{"a#b"},
-		{"a b"},
-		{"a\nb"},
-		{strings.Repeat("a", maxMemberIDLen+1)},
-		{someMemberID, danaID},
+		{""}, {"   "}, {"."}, {".."}, {"a/b"}, {`a\b`}, {"a?b"}, {"a#b"}, {"a b"}, {"a\nb"},
+		{strings.Repeat("a", maxMemberIDLen+1)}, {someMemberID, danaID},
 	} {
 		if got, err := parseAsMember(http.Header{asMemberHeader: bad}); err == nil {
 			t.Errorf("parseAsMember(%q) = %q, want error", bad, got)
@@ -525,7 +516,7 @@ func TestRequestIDAlwaysGenerated(t *testing.T) {
 	h, _ := setup(t, up.srv.URL, fakeAuth{}, 0)
 	seen := map[string]bool{}
 	for _, client := range []string{"", "client-id.1", "bad id\n"} {
-		w := do(h, "GET", "/nodes", map[string]string{"Authorization": "Bearer good", "X-Request-ID": client})
+		w := do(h, "GET", "/services/identity/nodes", map[string]string{"Authorization": "Bearer good", "X-Request-ID": client})
 		id := w.Header().Get("X-Request-ID")
 		if !generatedID.MatchString(id) || seen[id] || up.seen().Header.Get("X-Request-ID") != id {
 			t.Fatalf("client %q: id = %q, upstream %q", client, id, up.seen().Header.Get("X-Request-ID"))
@@ -542,7 +533,7 @@ func TestUpstreamDown(t *testing.T) {
 	addr := l.Addr().String()
 	l.Close()
 	h, _ := setup(t, "http://"+addr, fakeAuth{}, 0)
-	w := do(h, "GET", "/nodes", map[string]string{"Authorization": "Bearer good"})
+	w := do(h, "GET", "/services/identity/nodes", map[string]string{"Authorization": "Bearer good"})
 	if w.Code != 502 || decode(t, w).Error.Code != "SERVICE_UNAVAILABLE" {
 		t.Fatalf("status = %d", w.Code)
 	}
@@ -558,7 +549,7 @@ func TestUpstreamTimeout(t *testing.T) {
 	})
 	defer close(release)
 	h, _ := setup(t, up.srv.URL, fakeAuth{}, 50*time.Millisecond)
-	w := do(h, "GET", "/nodes", map[string]string{"Authorization": "Bearer good"})
+	w := do(h, "GET", "/services/identity/nodes", map[string]string{"Authorization": "Bearer good"})
 	if w.Code != 502 {
 		t.Fatalf("status = %d", w.Code)
 	}
@@ -568,13 +559,14 @@ func TestCORS(t *testing.T) {
 	up := newUpstream(t, nil)
 	h, _ := setup(t, up.srv.URL, fakeAuth{}, 0)
 
-	w := do(h, "OPTIONS", "/nodes", map[string]string{
+	w := do(h, "OPTIONS", "/services/identity/nodes", map[string]string{
 		"Origin":                        "https://console.test",
 		"Access-Control-Request-Method": "GET",
 	})
 	if w.Code != 204 || w.Header().Get("Access-Control-Allow-Origin") != "https://console.test" ||
 		!strings.Contains(w.Header().Get("Access-Control-Allow-Headers"), "Authorization") ||
-		!strings.Contains(w.Header().Get("Access-Control-Allow-Headers"), asMemberHeader) {
+		!strings.Contains(w.Header().Get("Access-Control-Allow-Headers"), asMemberHeader) ||
+		!strings.Contains(w.Header().Get("Access-Control-Allow-Headers"), reasonHeader) {
 		t.Fatalf("preflight: %d %v", w.Code, w.Header())
 	}
 	if w.Header().Get("Access-Control-Allow-Credentials") != "" {
@@ -584,7 +576,7 @@ func TestCORS(t *testing.T) {
 		t.Fatal("preflight forwarded")
 	}
 
-	w = do(h, "OPTIONS", "/nodes", map[string]string{
+	w = do(h, "OPTIONS", "/services/identity/nodes", map[string]string{
 		"Origin":                        "https://evil.test",
 		"Access-Control-Request-Method": "GET",
 	})
@@ -592,13 +584,13 @@ func TestCORS(t *testing.T) {
 		t.Fatalf("disallowed preflight: %d %v", w.Code, w.Header())
 	}
 
-	w = do(h, "GET", "/nodes", map[string]string{"Origin": "https://console.test"})
+	w = do(h, "GET", "/services/identity/nodes", map[string]string{"Origin": "https://console.test"})
 	if w.Code != 401 || w.Header().Get("Access-Control-Allow-Origin") != "https://console.test" ||
 		w.Header().Get("Access-Control-Expose-Headers") != "X-Request-ID" {
 		t.Fatalf("401 must be readable by the allowed origin: %v", w.Header())
 	}
 
-	w = do(h, "GET", "/nodes", map[string]string{"Origin": "https://console.test", "Authorization": "Bearer good"})
+	w = do(h, "GET", "/services/identity/nodes", map[string]string{"Origin": "https://console.test", "Authorization": "Bearer good"})
 	if got := w.Header().Values("Access-Control-Allow-Origin"); len(got) != 1 || got[0] != "https://console.test" {
 		t.Fatalf("forwarded ACAO = %v", got)
 	}
@@ -609,7 +601,7 @@ func TestCORS(t *testing.T) {
 
 func TestUnauthenticatedIsLogged(t *testing.T) {
 	h, logs := setup(t, "http://127.0.0.1:1", fakeAuth{}, 0)
-	do(h, "GET", "/nodes", nil)
+	do(h, "GET", "/services/identity/nodes", nil)
 	line := lastLog(t, logs)
 	if line["status"] != float64(401) || line["operator_id"] != nil || line["route"] != nil {
 		t.Fatalf("log = %v", line)
@@ -641,7 +633,7 @@ func TestClientDisconnectWritesNoBody(t *testing.T) {
 		<-r.Context().Done()
 	})
 	h, logs := setup(t, up.srv.URL, fakeAuth{}, 0)
-	r := httptest.NewRequest("GET", "/nodes", nil).WithContext(ctx)
+	r := httptest.NewRequest("GET", "/services/identity/nodes", nil).WithContext(ctx)
 	r.Header.Set("Authorization", "Bearer good")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)

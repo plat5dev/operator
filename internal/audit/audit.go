@@ -43,6 +43,7 @@ const (
 	MaxIPLen           = 256
 	MaxUserAgentChars  = 512
 	MaxPathChars       = 2048
+	MaxReasonChars     = 256
 
 	intentAttempts       = 3
 	intentAttemptTimeout = 500 * time.Millisecond
@@ -96,6 +97,7 @@ type Intent struct {
 	OccurredAt string            `json:"occurred_at"`
 	Actor      Actor             `json:"actor"`
 	ActingAs   *ActingAs         `json:"acting_as"`
+	Reason     *string           `json:"reason"`
 	RootID     *string           `json:"root_id"`
 	Nodes      []Node            `json:"nodes"`
 	Service    *string           `json:"service"`
@@ -179,6 +181,7 @@ func OutcomeFor(s *State, written int, responseBytes int64) Outcome {
 	default:
 		out.Outcome = Rejected
 		out.Status = status(written)
+		out.Details = s.Details
 	}
 	return out
 }
