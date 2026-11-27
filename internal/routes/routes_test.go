@@ -82,21 +82,21 @@ authorizer:
 
 func TestParseErrors(t *testing.T) {
 	cases := map[string]string{
-		"empty":                    `{}`,
-		"authzen missing url":      "services:\n  x: { url: http://x }\n",
-		"bad authz mode":           "services:\n  x: { url: http://x }\nauthorizer: { mode: magic }\n",
-		"bad authz timeout":        "services:\n  x: { url: http://x }\nauthorizer: { mode: disabled, timeout: 0s }\n",
-		"bad service name":         "services:\n  Identity: { url: http://x }\nauthorizer: { mode: disabled }\n",
-		"no url without cp":        "services:\n  x: {}\nauthorizer: { mode: disabled }\n",
-		"url path":                 "services:\n  x: { url: http://x/v1 }\nauthorizer: { mode: disabled }\n",
-		"bad timeout":              "services:\n  x: { url: http://x, timeout: -1s }\nauthorizer: { mode: disabled }\n",
-		"unknown field":            "unknown: 1\nservices:\n  x: { url: http://x }\nauthorizer: { mode: disabled }\n",
-		"bad policy claim":         "services:\n  x: { url: http://x }\nauthorizer: { mode: disabled }\npolicy_claims: ['bad..claim']\n",
-		"node not a param":         "services:\n  x:\n    url: http://x\n    routes:\n      - path: /a/{id}\n        node: other\n        methods: [GET]\nauthorizer: { mode: disabled }\n",
-		"dotted param":             "services:\n  x:\n    url: http://x\n    routes:\n      - path: /projects/{project.id}\n        methods: [GET]\nauthorizer: { mode: disabled }\n",
-		"overlapping routes":       "services:\n  x:\n    url: http://x\n    routes:\n      - path: /a/new\n        methods: [GET]\n      - path: /a/{id}\n        methods: [GET]\nauthorizer: { mode: disabled }\n",
-		"options method":           "services:\n  x:\n    url: http://x\n    routes:\n      - path: /a\n        methods: [OPTIONS]\nauthorizer: { mode: disabled }\n",
-		"service name too long":    "services:\n  " + strings.Repeat("a", 129) + ": { url: http://x }\nauthorizer: { mode: disabled }\n",
+		"empty":                 `{}`,
+		"authzen missing url":   "services:\n  x: { url: http://x }\n",
+		"bad authz mode":        "services:\n  x: { url: http://x }\nauthorizer: { mode: magic }\n",
+		"bad authz timeout":     "services:\n  x: { url: http://x }\nauthorizer: { mode: disabled, timeout: 0s }\n",
+		"bad service name":      "services:\n  Identity: { url: http://x }\nauthorizer: { mode: disabled }\n",
+		"no url without cp":     "services:\n  x: {}\nauthorizer: { mode: disabled }\n",
+		"url path":              "services:\n  x: { url: http://x/v1 }\nauthorizer: { mode: disabled }\n",
+		"bad timeout":           "services:\n  x: { url: http://x, timeout: -1s }\nauthorizer: { mode: disabled }\n",
+		"unknown field":         "unknown: 1\nservices:\n  x: { url: http://x }\nauthorizer: { mode: disabled }\n",
+		"bad policy claim":      "services:\n  x: { url: http://x }\nauthorizer: { mode: disabled }\npolicy_claims: ['bad..claim']\n",
+		"node not a param":      "services:\n  x:\n    url: http://x\n    routes:\n      - path: /a/{id}\n        node: other\n        methods: [GET]\nauthorizer: { mode: disabled }\n",
+		"dotted param":          "services:\n  x:\n    url: http://x\n    routes:\n      - path: /projects/{project.id}\n        methods: [GET]\nauthorizer: { mode: disabled }\n",
+		"overlapping routes":    "services:\n  x:\n    url: http://x\n    routes:\n      - path: /a/new\n        methods: [GET]\n      - path: /a/{id}\n        methods: [GET]\nauthorizer: { mode: disabled }\n",
+		"options method":        "services:\n  x:\n    url: http://x\n    routes:\n      - path: /a\n        methods: [OPTIONS]\nauthorizer: { mode: disabled }\n",
+		"service name too long": "services:\n  " + strings.Repeat("a", 129) + ": { url: http://x }\nauthorizer: { mode: disabled }\n",
 	}
 	for name, in := range cases {
 		t.Run(name, func(t *testing.T) {
